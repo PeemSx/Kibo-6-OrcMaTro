@@ -1,34 +1,38 @@
 package jp.jaxa.iss.kibo.rpc.sampleapk;
 
-import android.graphics.Bitmap;
-import android.util.Pair;
+        import android.util.Pair;
 
-import jp.jaxa.iss.kibo.rpc.api.KiboRpcService;
+        import jp.jaxa.iss.kibo.rpc.api.KiboRpcService;
 
-import gov.nasa.arc.astrobee.types.Point;
-import gov.nasa.arc.astrobee.types.Quaternion;
+        import gov.nasa.arc.astrobee.types.Point;
+        import gov.nasa.arc.astrobee.types.Quaternion;
 
-import org.opencv.core.Mat;
+        import org.opencv.core.Mat;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
+        import java.io.IOException;
+        import java.util.ArrayList;
+        import java.util.Arrays;
+        import java.util.HashMap;
 
-import org.tensorflow.lite.DataType;
-import org.tensorflow.lite.support.common.ops.NormalizeOp;
-import org.tensorflow.lite.support.image.ImageProcessor;
-import org.tensorflow.lite.task.vision.detector.ObjectDetector;
-import org.tensorflow.lite.task.vision.detector.ObjectDetector.ObjectDetectorOptions;
-import org.tensorflow.lite.task.vision.detector.Detection;
-import org.tensorflow.lite.support.image.TensorImage;
+        import org.tensorflow.lite.Interpreter;
+
+        import java.io.FileInputStream;
+
+        import java.nio.MappedByteBuffer;
+        import java.nio.channels.FileChannel;
+
+        import org.opencv.core.Size;
+
+        import org.opencv.imgproc.Imgproc;
+        import android.content.res.AssetFileDescriptor;
 
 /**
  * Class meant to handle commands from the Ground Data System and execute them in Astrobee.
  */
 
 public class YourService extends KiboRpcService {
+
+    private Interpreter tflite;
 
     @Override
     protected void runPlan1(){
@@ -52,23 +56,26 @@ public class YourService extends KiboRpcService {
         // The mission starts.
         api.startMission(); // Coordinate -> x:9.815 y:-9.806 z:4.293 | p = 1 0 0 0
 
+        try {
+            loadModel();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
 
         // Move to the first area
         api.moveTo(areaCenters.get(0).first, areaCenters.get(0).second, false);
 
-        loadModel();
+        // Take a photo and detect objects
+        Mat image = api.getMatNavCam();
+        ArrayList<String> detectedItems = detectObjects(image);
 
-        Bitmap bitmap = api.getBitmapNavCam();
+        // Log detected items
+        for (String item : detectedItems) {
 
-        TensorImage tensorImage = preprocess(bitmap);
-
-        List<Detection> results = objectDetector.detect(tensorImage);
-
-        for (Detection detection : results) {
-            System.out.println("Detected class: " + detection.getCategories().get(0).getLabel());
-            System.out.println("Confidence: " + detection.getCategories().get(0).getScore());
-            System.out.println("BoundingBox: " + detection.getBoundingBox().toString());
+            System.out.println("Detected: " + item);
         }
+
+
 
         // Move to the second Oasis zone
 //        api.moveTo(areaCenters.get(1).first, areaCenters.get(0).second,false);
@@ -76,62 +83,14 @@ public class YourService extends KiboRpcService {
         // Area scanning.
 //        scanArea();
 
-//        // Move to area #2
-//        Point area2Center = new Point(10.6, -8.2, 5.2); // Center of Area 1
-//        Quaternion lookingAtArea2 = new Quaternion(0, 0, -0.707f, 0.707f); // Facing Area 2
-//        api.moveTo(area2Center, lookingAtArea2, false);
-
-        // Get a camera image and read the AR tag.
-//        ReadAR();
-//
-//        // Move to area #3
-//        Point area3Center = new Point(10.6, -7.0, 5.1); // Center of Area 1
-//        Quaternion lookingAtArea3 = new Quaternion(0, 0, -0.707f, 0.707f); // Facing Area 3
-//        api.moveTo(area3Center, lookingAtArea3, false);
-//
-//        // Get a camera image and read the AR tag.
-//        ReadAR();
-//
-//        // Move to area #4
-//        Point area4Center = new Point(10.7, -6.0, 5.2); // Center of Area 1
-//        Quaternion lookingAtArea4 = new Quaternion(0, 0, -0.707f, 0.707f); // Facing Area 4
-//        api.moveTo(area4Center, lookingAtArea4, false);
-//
-//        // Get a camera image and read the AR tag.
-//        ReadAR();
 
         /* ******************************************************************************** */
-        /* Write your code to recognize the type and number of landmark items in each area! */
-        /* If there is a treasure item, remember it.                                        */
-        /* ******************************************************************************** */
 
-        // When you recognize landmark items, let’s set the type and number.
-//        api.setAreaInfo(1, "item_name", 1);
-
-        /* **************************************************** */
-        /* Let's move to each area and recognize the items. */
-        /* **************************************************** */
-
-        // When you move to the front of the astronaut, report the rounding completion. ( pos is good )
-//        Point point = new Point(11.143d, -6.7607d, 4.9654d);
-//        Quaternion quaternion = new Quaternion(0f, 0f, 0.707f, 0.707f);
-//        api.moveTo(point, quaternion, false);
         api.reportRoundingCompletion();
 
         //------------------------------------------------- Treasure Finding ---------------------------------------------------
-        /* ********************************************************** */
-        /* Write your code to recognize which target item the astronaut has. */
-        /* ********************************************************** */
 
-        //Santi.AI
-
-        // Let's notify the astronaut when you recognize it.
         api.notifyRecognitionItem();
-
-        /* ******************************************************************************************************* */
-        /* Write your code to move Astrobee to the location of the target item (what the astronaut is looking for) */
-        /* ******************************************************************************************************* */
-        // Take a snapshot of the target item.
         api.takeTargetItemSnapshot();
     }
 
@@ -184,38 +143,91 @@ public class YourService extends KiboRpcService {
 
     // Model
 
-    private ObjectDetector objectDetector;
 
-    // Load model
-    private void loadModel() {
-        try {
-            ObjectDetectorOptions options = ObjectDetectorOptions.builder()
-                    .setMaxResults(5)   // Max 5 detections
-                    .setScoreThreshold(0.5f) // Confidence threshold
-                    .build();
+    // Load model from assets
+    private void loadModel() throws IOException {
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("best_float32.tflite");
+        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
+        FileChannel fileChannel = inputStream.getChannel();
+        long startOffset = fileDescriptor.getStartOffset();
+        long declaredLength = fileDescriptor.getDeclaredLength();
+        MappedByteBuffer modelFile = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
 
-            objectDetector = ObjectDetector.createFromFileAndOptions(this, "best_float32.tflite", options);
-        } catch (IOException e) {
-            e.printStackTrace();
+        tflite = new Interpreter(modelFile);
+    }
+
+    private ArrayList<String> detectObjects(Mat image) {
+        // Preprocess image
+        Mat resized = new Mat();
+        Imgproc.resize(image, resized, new Size(640, 640));
+
+        // Convert to RGB if needed (YOLOv8 expects RGB)
+        Mat rgbImage = new Mat();
+        Imgproc.cvtColor(resized, rgbImage, Imgproc.COLOR_BGR2RGB);
+
+        // Convert to float array (input tensor)
+        float[][][][] input = new float[1][640][640][3];
+        for (int y = 0; y < 640; y++) {
+            for (int x = 0; x < 640; x++) {
+                double[] pixel = rgbImage.get(y, x);
+                input[0][y][x][0] = (float) (pixel[0] / 255.0);
+                input[0][y][x][1] = (float) (pixel[1] / 255.0);
+                input[0][y][x][2] = (float) (pixel[2] / 255.0);
+            }
         }
+
+        // YOLOv8 output format: [batch, num_outputs, num_classes+4]
+        // For 11 classes: [1, 8400, 15] (11 classes + 4 bbox coords)
+        float[][][] output = new float[1][15][8400];
+
+        // Run inference
+        tflite.run(input, output);
+
+        // Process results
+        ArrayList<String> detections = new ArrayList<>();
+        float confidenceThreshold = 0.5f;
+
+        if (detections.isEmpty()) {
+            System.out.println("No objects detected in the image.");
+        }
+
+        for (int i = 0; i < output[0].length; i++) {
+            // Find highest class confidence
+            int bestClassId = -1;
+            float bestConf = 0;
+
+            for (int c = 0; c < 11; c++) {  // Iterate through 11 classes
+                if (output[0][i][c+4] > bestConf) {
+                    bestConf = output[0][i][c+4];
+                    bestClassId = c;
+                }
+            }
+
+            // If confidence exceeds threshold, add to detections
+            if (bestConf > confidenceThreshold && bestClassId >= 0) {
+                // Get bounding box coordinates (x,y,w,h)
+                float x = output[0][i][0];
+                float y = output[0][i][1];
+                float w = output[0][i][2];
+                float h = output[0][i][3];
+
+                detections.add(getClassName(bestClassId) +
+                        " (" + bestConf + ") at [" + x + "," + y + "]");
+            }
+        }
+
+
+
+        return detections;
     }
 
-    private TensorImage preprocess(Bitmap bitmap) {
-        // Create a TensorImage object
-        TensorImage tensorImage = new TensorImage(DataType.FLOAT32);
-
-        // Load the bitmap into tensorImage
-        tensorImage.load(bitmap);
-
-        // Manually normalize the image (divide pixel values by 255)
-        TensorImage normalizedImage = TensorImage.fromBitmap(bitmap);
-
-        ImageProcessor imageProcessor = new ImageProcessor.Builder()
-                .add(new NormalizeOp(0, 255))  // 0 mean, divide by 255 std
-                .build();
-
-        normalizedImage = imageProcessor.process(normalizedImage);
-
-        return normalizedImage;
+    private String getClassName(int id) {
+        // Replace with your 11 actual class names
+        String[] classes = {
+                "Class1", "Class2", "Class3", "Class4", "Class5",
+                "Class6", "Class7", "Class8", "Class9", "Class10", "Class11"
+        };
+        return (id >= 0 && id < classes.length) ? classes[id] : "Unknown";
     }
+
 }
