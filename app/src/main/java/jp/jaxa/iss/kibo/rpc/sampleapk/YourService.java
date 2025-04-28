@@ -44,7 +44,7 @@ public class YourService extends KiboRpcService {
         int id;
         ArrayList<String> itemsArr = new ArrayList<>();
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
-                new Pair<>(new Point(10.925, -10.00, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f)),
+                new Pair<>(new Point(11.1, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(11.175, -8.875, 5.195), new Quaternion(0f, 0f, 0, 0)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f))
