@@ -72,47 +72,56 @@ public class YourService extends KiboRpcService {
             e.printStackTrace();
         }
 
-        // Move to the first area
-        api.moveTo(areaCenters.get(0).first, areaCenters.get(0).second, false);
+        //-- Move to the first area --
 
+        api.moveTo(areaCenters.get(0).first, areaCenters.get(0).second, false);
         // Take a photo and detect objects
         Mat image = api.getMatNavCam();
         api.saveMatImage(image, "first_area.png");
-
         api.saveMatImage(undistortedImage(image), "undistorted_first_area.png");
         processImageOnAstrobee(image);
-
         ArrayList<String> detectedItems = detectObjects(image);
-
         // Log detected items
         for (String item : detectedItems) {
-
             System.out.println("Detected: " + item);
         }
 
-        // Move to the first area
-        api.moveTo(areaCenters.get(1).first, areaCenters.get(1).second, false);
+        //-- Move to the second area --
 
+        api.moveTo(areaCenters.get(1).first, areaCenters.get(1).second, false);
         // Take a photo and detect objects
         image = api.getMatNavCam();
         api.saveMatImage(image, "second_area.png");
         api.saveMatImage(undistortedImage(image), "undistorted_second_area.png");
         processImageOnAstrobee(image);
-
         detectedItems = detectObjects(image);
-
         // Log detected items
         for (String item : detectedItems) {
             System.out.println("Detected: " + item);
         }
 
 
+        //-- Move to the third area --
+        Point point = new Point(11.143d, -6.7607d, 4.9654d);
+        Quaternion quaternion = new Quaternion(0f, 0f, 1f, 0f);
+        api.moveTo(point, quaternion, false);
+
+        // Take a photo and detect objects
+        image = api.getMatNavCam();
+        api.saveMatImage(image, "third_area.png");
+        api.saveMatImage(undistortedImage(image), "undistorted_third_area.png");
+        processImageOnAstrobee(image);
+        detectedItems = detectObjects(image);
+        // Log detected items
+        for (String item : detectedItems) {
+            System.out.println("Detected: " + item);
+        }
 
         // Move to the second Oasis zone
-//        api.moveTo(areaCenters.get(1).first, areaCenters.get(0).second,false);
+        // api.moveTo(areaCenters.get(1).first, areaCenters.get(0).second,false);
 
         // Area scanning.
-//        scanArea();
+        // scanArea();
 
 
         /* ******************************************************************************** */
