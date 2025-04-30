@@ -1,40 +1,40 @@
 package jp.jaxa.iss.kibo.rpc.sampleapk;
 
-        import android.util.Pair;
+import android.util.Pair;
 
-        import jp.jaxa.iss.kibo.rpc.api.KiboRpcService;
+import jp.jaxa.iss.kibo.rpc.api.KiboRpcService;
 
-        import gov.nasa.arc.astrobee.types.Point;
-        import gov.nasa.arc.astrobee.types.Quaternion;
+import gov.nasa.arc.astrobee.types.Point;
+import gov.nasa.arc.astrobee.types.Quaternion;
 
-        import org.opencv.aruco.Aruco;
-        import org.opencv.aruco.DetectorParameters;
-        import org.opencv.aruco.Dictionary;
-        import org.opencv.calib3d.Calib3d;
-        import org.opencv.core.CvType;
-        import org.opencv.core.Mat;
+import org.opencv.aruco.Aruco;
+import org.opencv.aruco.DetectorParameters;
+import org.opencv.aruco.Dictionary;
+import org.opencv.calib3d.Calib3d;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
 
-        import java.io.IOException;
-        import java.util.ArrayList;
-        import java.util.Arrays;
-        import java.util.HashMap;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 
-        import org.opencv.core.MatOfDouble;
-        import org.opencv.core.MatOfPoint;
-        import org.opencv.core.Rect;
-        import org.opencv.imgproc.CLAHE;
-        import org.tensorflow.lite.Interpreter;
+import org.opencv.core.MatOfDouble;
+import org.opencv.core.MatOfPoint;
+import org.opencv.core.Rect;
+import org.opencv.imgproc.CLAHE;
+import org.tensorflow.lite.Interpreter;
 
-        import java.io.FileInputStream;
+import java.io.FileInputStream;
 
-        import java.nio.MappedByteBuffer;
-        import java.nio.channels.FileChannel;
-        import java.util.List;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.List;
 
-        import org.opencv.core.Size;
+import org.opencv.core.Size;
 
-        import org.opencv.imgproc.Imgproc;
-        import android.content.res.AssetFileDescriptor;
+import org.opencv.imgproc.Imgproc;
+import android.content.res.AssetFileDescriptor;
 
 /**
  * Class meant to handle commands from the Ground Data System and execute them in Astrobee.
@@ -55,7 +55,7 @@ public class YourService extends KiboRpcService {
         ArrayList<String> itemsArr = new ArrayList<>();
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.1, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
-                new Pair<>(new Point(11.175, -8.875, 5.195), new Quaternion(0f, -0.707f, 0, 0.707f)),
+                new Pair<>(new Point(10.9, -8.20, 5.495), new Quaternion(0f, 0.707f, 0, 0.707f)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f))
         ));
@@ -77,7 +77,9 @@ public class YourService extends KiboRpcService {
 
         // Take a photo and detect objects
         Mat image = api.getMatNavCam();
-        api.saveMatImage(image, "first_area_4");
+        api.saveMatImage(image, "first_area.png");
+
+        api.saveMatImage(undistortedImage(image), "undistorted_first_area.png");
         processImageOnAstrobee(image);
 
         ArrayList<String> detectedItems = detectObjects(image);
@@ -93,12 +95,14 @@ public class YourService extends KiboRpcService {
 
         // Take a photo and detect objects
         image = api.getMatNavCam();
-        api.saveMatImage(image, "second_area");
+        api.saveMatImage(image, "second_area.png");
+        api.saveMatImage(undistortedImage(image), "undistorted_second_area.png");
+        processImageOnAstrobee(image);
+
         detectedItems = detectObjects(image);
 
         // Log detected items
         for (String item : detectedItems) {
-
             System.out.println("Detected: " + item);
         }
 
@@ -170,10 +174,9 @@ public class YourService extends KiboRpcService {
 
     // Model
 
-
     // Load model from assets
     private void loadModel() throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd("best_float32.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("best.tflite");
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = inputStream.getChannel();
         long startOffset = fileDescriptor.getStartOffset();
@@ -183,105 +186,106 @@ public class YourService extends KiboRpcService {
         tflite = new Interpreter(modelFile);
     }
 
+
     private ArrayList<String> detectObjects(Mat image) {
-        // Preprocess image
+        // Step 1: Resize to model input size (640x640)
         Mat resized = new Mat();
         Imgproc.resize(image, resized, new Size(640, 640));
 
-        // Convert to RGB if needed (YOLOv8 expects RGB)
+        // Step 2: Convert to RGB
         Mat rgbImage = new Mat();
         Imgproc.cvtColor(resized, rgbImage, Imgproc.COLOR_BGR2RGB);
 
-        // Convert to float array (input tensor)
+        // Step 3: Convert to float array for input
         float[][][][] input = new float[1][640][640][3];
         for (int y = 0; y < 640; y++) {
             for (int x = 0; x < 640; x++) {
                 double[] pixel = rgbImage.get(y, x);
-                input[0][y][x][0] = (float) (pixel[0] / 255.0);
-                input[0][y][x][1] = (float) (pixel[1] / 255.0);
-                input[0][y][x][2] = (float) (pixel[2] / 255.0);
+                input[0][y][x][0] = (float) (pixel[0] / 255.0);  // R
+                input[0][y][x][1] = (float) (pixel[1] / 255.0);  // G
+                input[0][y][x][2] = (float) (pixel[2] / 255.0);  // B
             }
         }
 
-        // YOLOv8 output format: [batch, num_outputs, num_classes+4]
-        // For 11 classes: [1, 8400, 15] (11 classes + 4 bbox coords)
-        float[][][] output = new float[1][15][8400];
+        // Step 4: Prepare output buffer [1, 300, 6]
+        float[][][] output = new float[1][300][6];
 
-        // Run inference
+        // Step 5: Run inference
         tflite.run(input, output);
 
-        // Process results
+        // Step 6: Process results
         ArrayList<String> detections = new ArrayList<>();
         float confidenceThreshold = 0.5f;
+
+        for (int i = 0; i < 300; i++) {
+            float conf = output[0][i][4];
+            if (conf < confidenceThreshold) continue;
+
+            int classId = (int) output[0][i][5];
+            float x1 = output[0][i][0];
+            float y1 = output[0][i][1];
+            float x2 = output[0][i][2];
+            float y2 = output[0][i][3];
+
+            String label = getClassName(classId) + " (" + conf + ") at [" + x1 + "," + y1 + "]";
+            detections.add(label);
+            System.out.println("Detected: " + label);
+        }
 
         if (detections.isEmpty()) {
             System.out.println("No objects detected in the image.");
         }
 
-        for (int i = 0; i < output[0].length; i++) {
-            // Find highest class confidence
-            int bestClassId = -1;
-            float bestConf = 0;
-
-            for (int c = 0; c < 11; c++) {  // Iterate through 11 classes
-                if (output[0][i][c+4] > bestConf) {
-                    bestConf = output[0][i][c+4];
-                    bestClassId = c;
-                }
-            }
-
-            // If confidence exceeds threshold, add to detections
-            if (bestConf > confidenceThreshold && bestClassId >= 0) {
-                // Get bounding box coordinates (x,y,w,h)
-                float x = output[0][i][0];
-                float y = output[0][i][1];
-                float w = output[0][i][2];
-                float h = output[0][i][3];
-
-                detections.add(getClassName(bestClassId) +
-                        " (" + bestConf + ") at [" + x + "," + y + "]");
-            }
-
-            System.out.println(getClassName(bestClassId));
-
-
-        }
-
-
-
         return detections;
     }
 
     private String getClassName(int id) {
-        // Replace with your 11 actual class names
+        // Updated with your 11 class names
         String[] classes = {
-                "Class1", "Class2", "Class3", "Class4", "Class5",
-                "Class6", "Class7", "Class8", "Class9", "Class10", "Class11"
+                "coin", "compass", "coral", "crystal", "diamond",
+                "emerald", "fossil", "key", "letter", "shell", "treasure_box"
         };
         return (id >= 0 && id < classes.length) ? classes[id] : "Unknown";
     }
 
+    // Image Processing
 
-    private void processImageOnAstrobee(Mat inputImage) {
+    private Mat undistortedImage(Mat inputImage) {
         // Resize
         Mat resized = new Mat();
         Imgproc.resize(inputImage, resized, new Size(1280, 960));
 
         // Undistort
         Mat undistorted = new Mat();
+
         Mat K = new Mat(3, 3, CvType.CV_64F);
         K.put(0, 0,
                 523.105750, 0.000000, 635.434258,
                 0.000000, 534.765913, 500.335102,
-                0.000000, 0.000000, 1.000000);
+                0.000000, 0.000000, 1.000000
+        );
 
-        Mat distCoeffs = new MatOfDouble(
+        MatOfDouble distCoeffs = new MatOfDouble(
                 -0.164787, 0.020375, -0.001572, -0.000369, 0.0
         );
 
-        Mat newK = Calib3d.getOptimalNewCameraMatrix(K, distCoeffs, new Size(1280, 960), 1, new Size(1280, 960), null);
+        // Prepare ROI container
+        Rect roi = new Rect();
+        Mat newK = Calib3d.getOptimalNewCameraMatrix(K, distCoeffs, new Size(1280, 960), 1, new Size(1280, 960), roi);
+
+        // Undistort the image
         Calib3d.undistort(resized, undistorted, K, distCoeffs, newK);
 
+        // Crop to valid region
+        Mat validArea = new Mat(undistorted, roi);
+
+        return validArea;
+    }
+
+
+    private void processImageOnAstrobee(Mat inputImage) {
+
+        Mat undistorted = undistortedImage(inputImage);
         // Detect ARUCO
         Mat gray = undistorted.clone(); // Already grayscale if from NavCam
         Dictionary dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_5X5_250);
@@ -296,19 +300,31 @@ public class YourService extends KiboRpcService {
         }
 
         for (int i = 0; i < ids.rows(); i++) {
-            Mat markerCorners = corners.get(i);
+            Mat points = corners.get(i);
 
-            // Find bounding box
-            MatOfPoint matOfPoint = new MatOfPoint(markerCorners);
-            Rect boundingRect = Imgproc.boundingRect(matOfPoint);
+            // Convert points
+            org.opencv.core.Point[] contourPoints = new org.opencv.core.Point[(int) points.total()];
+
+            for (int j = 0; j < points.total(); j++) {
+                double[] coords = points.get(0, j);
+                contourPoints[j] = new org.opencv.core.Point(coords[0], coords[1]);
+            }
+            // Build MatOfPoint
+            MatOfPoint matOfPoint = new MatOfPoint(contourPoints);
+
+            Rect rect = Imgproc.boundingRect(matOfPoint);
 
             int pad = 250;
-            int x1 = Math.max(boundingRect.x - pad, 0);
-            int y1 = Math.max(boundingRect.y - pad, 0);
-            int x2 = Math.min(boundingRect.x + boundingRect.width + pad, gray.width());
-            int y2 = Math.min(boundingRect.y + boundingRect.height + pad, gray.height());
+            int x1 = Math.max(rect.x - pad, 0);
+            int y1 = Math.max(rect.y - pad, 0);
+            int x2 = Math.min(rect.x + rect.width + pad, gray.width());
+            int y2 = Math.min(rect.y + rect.height + pad, gray.height());
 
-            Mat tagCrop = new Mat(gray, new Rect(x1, y1, x2 - x1, y2 - y1));
+            Rect paddedRect = new Rect(x1, y1, x2 - x1, y2 - y1);
+            Mat tagCrop = new Mat(gray, paddedRect);
+            api.saveMatImage(tagCrop,"tagCrop.png");
+
+            detectObjects(tagCrop); //------------ try detection using tagCrop
 
             // CLAHE Enhancement
             CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
@@ -340,20 +356,24 @@ public class YourService extends KiboRpcService {
                 if (area < 100) continue;
                 if (!isClosedContour(cnt)) continue;
 
-                Rect rect = Imgproc.boundingRect(cnt);
-                if (rect.width < 10 || rect.height < 10) continue;
+                // 💡 Renamed to 'contourRect' instead of 'rect'
+                Rect contourRect = Imgproc.boundingRect(cnt);
 
-                int cx1 = Math.max(rect.x - 5, 0);
-                int cy1 = Math.max(rect.y - 5, 0);
-                int cx2 = Math.min(rect.x + rect.width + 5, tagCrop.width());
-                int cy2 = Math.min(rect.y + rect.height + 5, tagCrop.height());
+                if (contourRect.width < 10 || contourRect.height < 10) continue;
 
-                Mat croppedRegion = new Mat(tagCrop, new Rect(cx1, cy1, cx2 - cx1, cy2 - cy1));
-                // You can now save or analyze 'croppedRegion'
-                String filename = "contour_" + j + ".png";
-                api.saveMatImage(croppedRegion, filename);
-                detectObjects(croppedRegion);
-                System.out.println("Saved: " + filename);
+                int cx1 = Math.max(contourRect.x - 5, 0);
+                int cy1 = Math.max(contourRect.y - 5, 0);
+                int cx2 = Math.min(contourRect.x + contourRect.width + 5, tagCrop.width());
+                int cy2 = Math.min(contourRect.y + contourRect.height + 5, tagCrop.height());
+
+                if (cx2 > cx1 && cy2 > cy1) {
+                    Mat croppedRegion = new Mat(tagCrop, new Rect(cx1, cy1, cx2 - cx1, cy2 - cy1));
+
+                    String filename = "contour_" + j + ".png";
+                    api.saveMatImage(croppedRegion, filename);
+                    detectObjects(croppedRegion);
+                    System.out.println("Saved: " + filename);
+                }
             }
         }
     }
