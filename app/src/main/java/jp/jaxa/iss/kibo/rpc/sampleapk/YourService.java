@@ -7,6 +7,7 @@ import jp.jaxa.iss.kibo.rpc.api.KiboRpcService;
 import gov.nasa.arc.astrobee.types.Point;
 import gov.nasa.arc.astrobee.types.Quaternion;
 
+import org.json.JSONObject;
 import org.opencv.aruco.Aruco;
 import org.opencv.aruco.DetectorParameters;
 import org.opencv.aruco.Dictionary;
@@ -30,6 +31,7 @@ import java.io.FileInputStream;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.List;
+import java.util.Map;
 
 import org.opencv.core.Size;
 
@@ -48,9 +50,9 @@ public class YourService extends KiboRpcService {
     protected void runPlan1(){
         //--------------------------------------------- Variables Declaration -------------------------------------------------------
 
-        HashMap<String, ArrayList<String>> foundItemsMap = new HashMap<>();
-        String currentArea;
-        String foundItem;
+        List<Map<String, Integer>> foundItemsPerArea = new ArrayList<>();
+        Map<String, Integer> itemCounts = new HashMap<>();
+        String item;
         int id;
         ArrayList<String> itemsArr = new ArrayList<>();
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
@@ -59,8 +61,28 @@ public class YourService extends KiboRpcService {
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f))
         ));
+        ArrayList<Pair<Point, Quaternion>> oasisCenters = new ArrayList<>(Arrays.asList(
+                new Pair<>(
+                        new Point(10.925, -9.85, 4.695),      //  (10.425+11.425)/2 , (-10.2-9.5)/2 , (4.445+4.945)/2
+                        new Quaternion(0f, 0f, -0.707f, 0.707f)
+                ),
+                new Pair<>(
+                        new Point(11.175, -8.975, 5.195),      //  (10.925+11.425)/2 , (-9.5-8.45)/2 , (4.945+5.445)/2
+                        new Quaternion(0f, 0.707f, 0f, 0.707f)
+                ),
 
+                new Pair<>(
+                        new Point(10.700, -7.925, 5.195),      //  (10.425+10.975)/2 , (-8.45-7.4)/2 , (4.945+5.445)/2
+                        new Quaternion(0f, 0f, -0.707f, 0.707f)
+                ),
+
+                new Pair<>(
+                        new Point(11.175, -6.875, 4.685),      //  (10.925+11.425)/2 , (-7.4-6.35)/2 , (4.425+4.945)/2
+                        new Quaternion(0f, 0.707f, 0f, 0.707f)
+                )
+        ));
         List<Mat> croppedImages;
+        Mat image;
 
         //--------------------------------------------- MISSION START -------------------------------------------------------
         //--------------------------------------------- Area Exploring -------------------------------------------------------
@@ -75,44 +97,27 @@ public class YourService extends KiboRpcService {
         }
 
         //-- Move to the first area --
-
         api.moveTo(areaCenters.get(0).first, areaCenters.get(0).second, false);
         // Take a photo and detect objects
-        Mat image = api.getMatNavCam();
-        api.saveMatImage(image, "first_area.png");
-        api.saveMatImage(undistortedImage(image), "undistorted_first_area.png");
-        croppedImages = CroppedContours(image);
-        for (Mat region : croppedImages) {
-            classifyImage(region);
-        }
-        //-- Move to the second area --
+        image = api.getMatNavCam();
+        id = readAR(image);
+        analyzeAndStoreAreaItems(image, id, foundItemsPerArea);
 
+        //-- Move to the second area --
         api.moveTo(areaCenters.get(1).first, areaCenters.get(1).second, false);
         // Take a photo and detect objects
         image = api.getMatNavCam();
-        api.saveMatImage(image, "second_area.png");
-        api.saveMatImage(undistortedImage(image), "undistorted_second_area.png");
-        croppedImages = CroppedContours(image);
+        id = readAR(image);
+        analyzeAndStoreAreaItems(image, id, foundItemsPerArea);
 
-
-        //-- Move to the third area --
+        //-- Move to the astronaut --
         Point point = new Point(11.143d, -6.7607d, 4.9654d);
         Quaternion quaternion = new Quaternion(0f, 0f, 1f, 0f);
         api.moveTo(point, quaternion, false);
-
         // Take a photo and detect objects
         image = api.getMatNavCam();
-        api.saveMatImage(image, "third_area.png");
-        api.saveMatImage(undistortedImage(image), "undistorted_third_area.png");
-        croppedImages = CroppedContours(image);
-
-
-        // Move to the second Oasis zone
-        // api.moveTo(areaCenters.get(1).first, areaCenters.get(0).second,false);
-
-        // Area scanning.
-        // scanArea();
-
+        id = readAR(image);
+        analyzeAndStoreAreaItems(image, id, foundItemsPerArea);
 
         /* ******************************************************************************** */
 
@@ -136,7 +141,6 @@ public class YourService extends KiboRpcService {
 
 
     private int readAR(Mat image){
-
         // Use ArUco detector (part of OpenCV contrib modules)
         org.opencv.aruco.Dictionary dictionary = org.opencv.aruco.Aruco.getPredefinedDictionary(org.opencv.aruco.Aruco.DICT_5X5_250);
         java.util.List<Mat> corners = new java.util.ArrayList<>();
@@ -155,11 +159,40 @@ public class YourService extends KiboRpcService {
             }
         }
 
-
         System.out.println("AR tag wasn't detected!!!");
         return -1;
     }
 
+    private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
+        // Save original and undistorted images
+        api.saveMatImage(image, "area_" + areaId + ".png");
+        api.saveMatImage(undistortedImage(image), "undistorted_area_" + areaId + ".png");
+
+        // Detect and classify items
+        List<Mat> croppedImages = CroppedContours(image);
+        Map<String, Integer> itemCounts = new HashMap<>();
+
+        for (Mat region : croppedImages) {
+            String item = classifyImage(region);
+            item = item.contains("(") ? item.substring(0, item.indexOf("(")).trim() : item;
+
+            if (!item.equals("unwanted")) {
+                itemCounts.put(item, itemCounts.getOrDefault(item, 0) + 1);
+            }
+        }
+
+        // Store result in list
+        foundItemsPerArea.add(itemCounts);
+
+        // Report to API
+        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
+            api.setAreaInfo(areaId, entry.getKey(), entry.getValue());
+        }
+
+        // Debug
+        System.out.println("----- ID : " + areaId);
+        System.out.println(new JSONObject(itemCounts).toString());
+    }
 
     // Model
 
@@ -232,39 +265,30 @@ public class YourService extends KiboRpcService {
         // Resize
         Mat resized = new Mat();
         Imgproc.resize(inputImage, resized, new Size(1280, 960));
-
         // Undistort
         Mat undistorted = new Mat();
-
         Mat K = new Mat(3, 3, CvType.CV_64F);
         K.put(0, 0,
                 523.105750, 0.000000, 635.434258,
                 0.000000, 534.765913, 500.335102,
                 0.000000, 0.000000, 1.000000
         );
-
         MatOfDouble distCoeffs = new MatOfDouble(
                 -0.164787, 0.020375, -0.001572, -0.000369, 0.0
         );
-
         // Prepare ROI container
         Rect roi = new Rect();
         Mat newK = Calib3d.getOptimalNewCameraMatrix(K, distCoeffs, new Size(1280, 960), 1, new Size(1280, 960), roi);
-
         // Undistort the image
         Calib3d.undistort(resized, undistorted, K, distCoeffs, newK);
-
         // Crop to valid region
         Mat validArea = new Mat(undistorted, roi);
-
         return validArea;
     }
 
 
     private List<Mat> CroppedContours(Mat inputImage) {
-
         List<Mat> significantRegions = new ArrayList<>();
-
         Mat undistorted = undistortedImage(inputImage);
         Mat gray = undistorted.clone();
 
@@ -338,6 +362,7 @@ public class YourService extends KiboRpcService {
 
                 if (cx2 > cx1 && cy2 > cy1) {
                     Mat croppedRegion = new Mat(tagCrop, new Rect(cx1, cy1, cx2 - cx1, cy2 - cy1));
+                    api.saveMatImage(croppedRegion, "contour_" + j + ".png");
                     significantRegions.add(croppedRegion);
                 }
             }
@@ -351,7 +376,7 @@ public class YourService extends KiboRpcService {
         org.opencv.core.Point[] pts = cnt.toArray();
         if (pts.length < 2) return false;
         double distance = Math.sqrt(Math.pow(pts[0].x - pts[pts.length - 1].x, 2) + Math.pow(pts[0].y - pts[pts.length - 1].y, 2));
-        return distance < 10;
+        return distance < 25;
     }
 
 
