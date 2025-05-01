@@ -60,6 +60,8 @@ public class YourService extends KiboRpcService {
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f))
         ));
 
+        List<Mat> croppedImages;
+
         //--------------------------------------------- MISSION START -------------------------------------------------------
         //--------------------------------------------- Area Exploring -------------------------------------------------------
 
@@ -79,13 +81,10 @@ public class YourService extends KiboRpcService {
         Mat image = api.getMatNavCam();
         api.saveMatImage(image, "first_area.png");
         api.saveMatImage(undistortedImage(image), "undistorted_first_area.png");
-        processImageOnAstrobee(image);
-        ArrayList<String> detectedItems = detectObjects(image);
-        // Log detected items
-        for (String item : detectedItems) {
-            System.out.println("Detected: " + item);
+        croppedImages = CroppedContours(image);
+        for (Mat region : croppedImages) {
+            classifyImage(region);
         }
-
         //-- Move to the second area --
 
         api.moveTo(areaCenters.get(1).first, areaCenters.get(1).second, false);
@@ -93,12 +92,7 @@ public class YourService extends KiboRpcService {
         image = api.getMatNavCam();
         api.saveMatImage(image, "second_area.png");
         api.saveMatImage(undistortedImage(image), "undistorted_second_area.png");
-        processImageOnAstrobee(image);
-        detectedItems = detectObjects(image);
-        // Log detected items
-        for (String item : detectedItems) {
-            System.out.println("Detected: " + item);
-        }
+        croppedImages = CroppedContours(image);
 
 
         //-- Move to the third area --
@@ -110,12 +104,8 @@ public class YourService extends KiboRpcService {
         image = api.getMatNavCam();
         api.saveMatImage(image, "third_area.png");
         api.saveMatImage(undistortedImage(image), "undistorted_third_area.png");
-        processImageOnAstrobee(image);
-        detectedItems = detectObjects(image);
-        // Log detected items
-        for (String item : detectedItems) {
-            System.out.println("Detected: " + item);
-        }
+        croppedImages = CroppedContours(image);
+
 
         // Move to the second Oasis zone
         // api.moveTo(areaCenters.get(1).first, areaCenters.get(0).second,false);
@@ -165,27 +155,16 @@ public class YourService extends KiboRpcService {
             }
         }
 
+
         System.out.println("AR tag wasn't detected!!!");
         return -1;
     }
 
 
-    private void scanArea(Mat image){
-
-        //pre-processing
-
-        int id = readAR(image);
-    }
-
-    private void readImage(){
-
-    }
-
     // Model
 
-    // Load model from assets
     private void loadModel() throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd("best.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("cls_model.tflite");
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = inputStream.getChannel();
         long startOffset = fileDescriptor.getStartOffset();
@@ -195,20 +174,21 @@ public class YourService extends KiboRpcService {
         tflite = new Interpreter(modelFile);
     }
 
-
-    private ArrayList<String> detectObjects(Mat image) {
-        // Step 1: Resize to model input size (640x640)
+    // Predict class for a single image
+    private String classifyImage(Mat image) {
+        // Step 1: Resize to model input size (e.g., 96x96)
+        int inputSize = 96;
         Mat resized = new Mat();
-        Imgproc.resize(image, resized, new Size(640, 640));
+        Imgproc.resize(image, resized, new Size(inputSize, inputSize));
 
         // Step 2: Convert to RGB
         Mat rgbImage = new Mat();
         Imgproc.cvtColor(resized, rgbImage, Imgproc.COLOR_BGR2RGB);
 
-        // Step 3: Convert to float array for input
-        float[][][][] input = new float[1][640][640][3];
-        for (int y = 0; y < 640; y++) {
-            for (int x = 0; x < 640; x++) {
+        // Step 3: Normalize and prepare input [1, 96, 96, 3]
+        float[][][][] input = new float[1][inputSize][inputSize][3];
+        for (int y = 0; y < inputSize; y++) {
+            for (int x = 0; x < inputSize; x++) {
                 double[] pixel = rgbImage.get(y, x);
                 input[0][y][x][0] = (float) (pixel[0] / 255.0);  // R
                 input[0][y][x][1] = (float) (pixel[1] / 255.0);  // G
@@ -216,43 +196,32 @@ public class YourService extends KiboRpcService {
             }
         }
 
-        // Step 4: Prepare output buffer [1, 300, 6]
-        float[][][] output = new float[1][300][6];
+        // Step 4: Prepare output buffer for [1, num_classes]
+        float[][] output = new float[1][12]; // You have 12 classes (including "unwanted")
 
         // Step 5: Run inference
         tflite.run(input, output);
 
-        // Step 6: Process results
-        ArrayList<String> detections = new ArrayList<>();
-        float confidenceThreshold = 0.5f;
-
-        for (int i = 0; i < 300; i++) {
-            float conf = output[0][i][4];
-            if (conf < confidenceThreshold) continue;
-
-            int classId = (int) output[0][i][5];
-            float x1 = output[0][i][0];
-            float y1 = output[0][i][1];
-            float x2 = output[0][i][2];
-            float y2 = output[0][i][3];
-
-            String label = getClassName(classId) + " (" + conf + ") at [" + x1 + "," + y1 + "]";
-            detections.add(label);
-            System.out.println("Detected: " + label);
+        // Step 6: Get top-1 prediction
+        float maxProb = -1f;
+        int maxIndex = -1;
+        for (int i = 0; i < output[0].length; i++) {
+            if (output[0][i] > maxProb) {
+                maxProb = output[0][i];
+                maxIndex = i;
+            }
         }
 
-        if (detections.isEmpty()) {
-            System.out.println("No objects detected in the image.");
-        }
-
-        return detections;
+        String predictedClass = getClassName(maxIndex);
+        System.out.println("Predicted: " + predictedClass + " (" + maxProb + ")");
+        return predictedClass;
     }
 
+    // Map class ID to label
     private String getClassName(int id) {
-        // Updated with your 11 class names
         String[] classes = {
                 "coin", "compass", "coral", "crystal", "diamond",
-                "emerald", "fossil", "key", "letter", "shell", "treasure_box"
+                "emerald", "fossil", "key", "letter", "shell", "treasure_box", "unwanted"
         };
         return (id >= 0 && id < classes.length) ? classes[id] : "Unknown";
     }
@@ -292,11 +261,13 @@ public class YourService extends KiboRpcService {
     }
 
 
-    private void processImageOnAstrobee(Mat inputImage) {
+    private List<Mat> CroppedContours(Mat inputImage) {
+
+        List<Mat> significantRegions = new ArrayList<>();
 
         Mat undistorted = undistortedImage(inputImage);
-        // Detect ARUCO
-        Mat gray = undistorted.clone(); // Already grayscale if from NavCam
+        Mat gray = undistorted.clone();
+
         Dictionary dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_5X5_250);
         List<Mat> corners = new ArrayList<>();
         Mat ids = new Mat();
@@ -305,22 +276,19 @@ public class YourService extends KiboRpcService {
 
         if (ids.empty()) {
             System.out.println("No AR tag detected.");
-            return;
+            return significantRegions; // return empty
         }
 
         for (int i = 0; i < ids.rows(); i++) {
             Mat points = corners.get(i);
-
-            // Convert points
             org.opencv.core.Point[] contourPoints = new org.opencv.core.Point[(int) points.total()];
 
             for (int j = 0; j < points.total(); j++) {
                 double[] coords = points.get(0, j);
                 contourPoints[j] = new org.opencv.core.Point(coords[0], coords[1]);
             }
-            // Build MatOfPoint
-            MatOfPoint matOfPoint = new MatOfPoint(contourPoints);
 
+            MatOfPoint matOfPoint = new MatOfPoint(contourPoints);
             Rect rect = Imgproc.boundingRect(matOfPoint);
 
             int pad = 250;
@@ -331,9 +299,6 @@ public class YourService extends KiboRpcService {
 
             Rect paddedRect = new Rect(x1, y1, x2 - x1, y2 - y1);
             Mat tagCrop = new Mat(gray, paddedRect);
-            api.saveMatImage(tagCrop,"tagCrop.png");
-
-            detectObjects(tagCrop); //------------ try detection using tagCrop
 
             // CLAHE Enhancement
             CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
@@ -353,7 +318,6 @@ public class YourService extends KiboRpcService {
             Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
             Imgproc.morphologyEx(edges, closed, Imgproc.MORPH_CLOSE, kernel);
 
-            // Find Contours
             List<MatOfPoint> contours = new ArrayList<>();
             Mat hierarchy = new Mat();
             Imgproc.findContours(closed, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
@@ -362,12 +326,9 @@ public class YourService extends KiboRpcService {
                 MatOfPoint cnt = contours.get(j);
                 double area = Imgproc.contourArea(cnt);
 
-                if (area < 100) continue;
-                if (!isClosedContour(cnt)) continue;
+                if (area < 100 || !isClosedContour(cnt)) continue;
 
-                // 💡 Renamed to 'contourRect' instead of 'rect'
                 Rect contourRect = Imgproc.boundingRect(cnt);
-
                 if (contourRect.width < 10 || contourRect.height < 10) continue;
 
                 int cx1 = Math.max(contourRect.x - 5, 0);
@@ -377,14 +338,12 @@ public class YourService extends KiboRpcService {
 
                 if (cx2 > cx1 && cy2 > cy1) {
                     Mat croppedRegion = new Mat(tagCrop, new Rect(cx1, cy1, cx2 - cx1, cy2 - cy1));
-
-                    String filename = "contour_" + j + ".png";
-                    api.saveMatImage(croppedRegion, filename);
-                    detectObjects(croppedRegion);
-                    System.out.println("Saved: " + filename);
+                    significantRegions.add(croppedRegion);
                 }
             }
         }
+
+        return significantRegions;
     }
 
     // Utility method
