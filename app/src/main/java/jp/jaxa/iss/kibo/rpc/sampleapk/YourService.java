@@ -174,7 +174,7 @@ public class YourService extends KiboRpcService {
 
     private String findTheTreasure(Mat image){
 
-
+        return "";
     }
 
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
