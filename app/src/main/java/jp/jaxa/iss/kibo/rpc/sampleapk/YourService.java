@@ -30,8 +30,10 @@ import java.io.FileInputStream;
 
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.opencv.core.Size;
 
@@ -57,7 +59,7 @@ public class YourService extends KiboRpcService {
         ArrayList<String> itemsArr = new ArrayList<>();
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.1, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
-                new Pair<>(new Point(10.9, -8.20, 5.495), new Quaternion(0f, 0.707f, 0, 0.707f)),
+                new Pair<>(new Point(10.9, -8.20, 4.9), new Quaternion(0f, 0.707f, 0, 0.707f)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.925, -10.25, 4.695), new Quaternion(0f, 0f, -0.707f, 0.707f))
         ));
@@ -108,6 +110,7 @@ public class YourService extends KiboRpcService {
         // Take a photo and detect objects
         image = api.getMatNavCam();
         id = readAR(image);
+        id = id % 10;
         analyzeAndStoreAreaItems(image, id, foundItemsPerArea);
 
         //-- Move to the astronaut --
@@ -185,10 +188,13 @@ public class YourService extends KiboRpcService {
         foundItemsPerArea.add(itemCounts);
 
         // Report to API
-        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
-            api.setAreaInfo(areaId, entry.getKey(), entry.getValue());
-        }
+        Set<String> ignoreItems = new HashSet<>(Arrays.asList("emerald", "diamond", "crystal"));
 
+        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
+            if (!ignoreItems.contains(entry.getKey())) {
+                api.setAreaInfo(areaId, entry.getKey(), entry.getValue());
+            }
+        }
         // Debug
         System.out.println("----- ID : " + areaId);
         System.out.println(new JSONObject(itemCounts).toString());
