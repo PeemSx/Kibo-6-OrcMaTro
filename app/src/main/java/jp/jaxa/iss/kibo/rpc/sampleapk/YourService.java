@@ -85,7 +85,7 @@ public class YourService extends KiboRpcService {
         ));
         List<Mat> croppedImages;
         Mat image;
-
+        List<Mat> areaImages;
         //--------------------------------------------- MISSION START -------------------------------------------------------
         //--------------------------------------------- Area Exploring -------------------------------------------------------
 
@@ -110,7 +110,6 @@ public class YourService extends KiboRpcService {
         // Take a photo and detect objects
         image = api.getMatNavCam();
         id = readAR(image);
-        id = id % 10;
         analyzeAndStoreAreaItems(image, id, foundItemsPerArea);
 
         //-- Move to the astronaut --
@@ -127,7 +126,14 @@ public class YourService extends KiboRpcService {
         api.reportRoundingCompletion();
 
         //------------------------------------------------- Treasure Finding ---------------------------------------------------
+        for (int i = 0; i < foundItemsPerArea.size(); i++) {
+            Map<String, Integer> areaMap = foundItemsPerArea.get(i);
+            System.out.println("Area " + i + ":");
 
+            for (Map.Entry<String, Integer> entry : areaMap.entrySet()) {
+                System.out.println("  Item: " + entry.getKey() + " → Count: " + entry.getValue());
+            }
+        }
         api.notifyRecognitionItem();
         api.takeTargetItemSnapshot();
     }
@@ -166,11 +172,17 @@ public class YourService extends KiboRpcService {
         return -1;
     }
 
+    private String findTheTreasure(Mat image){
+
+
+    }
+
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
         // Save original and undistorted images
         api.saveMatImage(image, "area_" + areaId + ".png");
         api.saveMatImage(undistortedImage(image), "undistorted_area_" + areaId + ".png");
 
+        areaId = areaId % 10;
         // Detect and classify items
         List<Mat> croppedImages = CroppedContours(image);
         Map<String, Integer> itemCounts = new HashMap<>();
