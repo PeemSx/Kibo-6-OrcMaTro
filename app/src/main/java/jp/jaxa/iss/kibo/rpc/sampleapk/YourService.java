@@ -89,7 +89,7 @@ public class YourService extends KiboRpcService {
                 {0.0, 0.0, 0.0, 0.1},  // Area 1
                 {0.0, 0.0, 0.20, 0.20}, // Area 2
                 {0.0, 0.0, 0.0, 0.50},  // Area 3
-                {0.2, 0.0, 0.2, 0.4}   // Area 4
+                {0.2, 0.0, 0.2, 0.2}   // Area 4
         };
         //--------------------------------------------- MISSION START -------------------------------------------------------
         //--------------------------------------------- Area Exploring -------------------------------------------------------
@@ -121,8 +121,8 @@ public class YourService extends KiboRpcService {
                 if(i == 4){
                     dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
                 }else if (i == 3){
-                    dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY() - 0.2, goal.first.getZ());
-
+                    dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY() - 0.5, goal.first.getZ());
+                    api.flashlightControlFront(0.5f);
                 }
                 else{
                     dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
@@ -183,7 +183,7 @@ public class YourService extends KiboRpcService {
         image = api.getMatNavCam();
         api.saveMatImage(image, "target_area.png");
         image = undistortedImage(image);
-        image = cropArea(image, 0.2, 0.2, 0.1, 0.4);
+        image = cropArea(image, 0.2, 0.2, 0.2, 0.4);
         api.saveMatImage(image, "cropped_target_area.png");
         String treasure = findTheTreasure(image);
 
@@ -665,7 +665,7 @@ public class YourService extends KiboRpcService {
 
     // Model
     private void loadModel() throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd("cls_32.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("cls_model_v2.tflite");
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = inputStream.getChannel();
         long startOffset = fileDescriptor.getStartOffset();
