@@ -61,15 +61,15 @@ public class YourService extends KiboRpcService {
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.0, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.75, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
-                new Pair<>(new Point(11.0, -7.3, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
+                new Pair<>(new Point(11.0, -7.6, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
                 new Pair<>(new Point(10.6, -6.76, 4.96), new Quaternion(0f, 0f, 1, 0))
         ));
         Mat image;
         double[][] cropParams = {
                 {0.0, 0.0, 0.0, 0.1},  // Area 1
-                {0.0, 0.0, 0.1, 0.25}, // Area 2
-                {0.0, 0.0, 0.125, 0.4},  // Area 3
-                {0.0, 0.0, 0.4, 0.1}   // Area 4
+                {0.0, 0.0, 0.2, 0.2}, // Area 2
+                {0.0, 0.0, 0.15, 0.25},  // Area 3
+                {0.0, 0.0, 0.0, 0.0}   // Area 4
         };
         //--------------------------------------------- MISSION START -------------------------------------------------------
         //--------------------------------------------- Area Exploring -------------------------------------------------------
@@ -93,29 +93,32 @@ public class YourService extends KiboRpcService {
 
 
             // move and rotate using AR tag's info
-            Pair<Point, Quaternion> goal = computeTagApproachPose(image);
-            if (goal != null) {
-                switch (id) {
-                    case 101:
-                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
-                        break;
-                    case 103:
-                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
-                        api.flashlightControlFront(0.3f);
-                        break;
-                    case 104:
-                        dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
-                        break;
-                    default:
-                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(i).first.getZ());
-                        break;
-                }
-                System.out.println("Area " + i +" Next Coordinate: " +dst.toString());
-                moveToWithCheck(dst, areaCenters.get(i).second, false);
-            } else {
-                System.out.println("❌ AR tag pose not computed — skipping movement.");
-            }
+//            Pair<Point, Quaternion> goal = computeTagApproachPose(image);
+//            if (goal != null) {
+//                switch (id) {
+//                    case 101:
+//                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
+//                        break;
+//                    case 103:
+//                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
+//                        api.flashlightControlFront(0.3f);
+//                        break;
+//                    case 104:
+//                        dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
+//                        break;
+//                    default:
+//                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(i).first.getZ());
+//                        break;
+//                }
+//                System.out.println("Area " + i +" Next Coordinate: " +dst.toString());
+//                moveToWithCheck(dst, areaCenters.get(i).second, false);
+//            } else {
+//                System.out.println("❌ AR tag pose not computed — skipping movement.");
+//            }
 
+            if (id == 103){
+                api.flashlightControlFront(0.35f);
+            }
             // Pre-processing
             image = api.getMatNavCam();
 
@@ -143,19 +146,23 @@ public class YourService extends KiboRpcService {
         }
 
         // complete exploring 4 areas
-        api.reportRoundingCompletion();
-
         //------------------------------------------------- Treasure Finding ---------------------------------------------------\
         // Move to the Astronaut
-        Point point = new Point(11.243d, -6.4607d, 4.9654d);
+        Point point = new Point(11.1d, -6.4d, 4.965d);
         Quaternion quaternion = new Quaternion(0f, 0f, 0.707f, 0.707f);
         moveToWithCheck(point, quaternion, false);
+        api.reportRoundingCompletion();
 
+        try {
+            Thread.sleep(2000); // 1000 ms = 1 second
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
         // detect the treasure
         image = api.getMatNavCam();
         api.saveMatImage(image, "target_area.png");
         image = undistortedImage(image);
-        image = cropArea(image, 0.2, 0.2, 0.1, 0.4);
+        image = cropArea(image, 0.2, 0.2, 0.25, 0.25);
         api.saveMatImage(image, "cropped_target_area.png");
         String treasure = findTheTreasure(image);
 
@@ -188,6 +195,12 @@ public class YourService extends KiboRpcService {
 
         if(treasureArea != -1){
             moveToWithCheck(areaCenters.get(treasureArea).first, areaCenters.get(treasureArea).second, false);
+            image = api.getMatNavCam();
+            Pair<Point, Quaternion> goal = computeTagApproachPose(image);
+            if (goal != null){
+                moveToWithCheck(goal.first, goal.second, false);
+            }
+
         }else {
             System.out.println("Treasure Area NOT found");
         }
@@ -266,82 +279,50 @@ public class YourService extends KiboRpcService {
 
     private List<Mat> CroppedContours(Mat inputImage) {
         List<Mat> significantRegions = new ArrayList<>();
-        Mat undistorted = undistortedImage(inputImage);
-        Mat gray = undistorted.clone();
 
-        Dictionary dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_5X5_250);
-        List<Mat> corners = new ArrayList<>();
-        Mat ids = new Mat();
-        DetectorParameters parameters = DetectorParameters.create();
-        Aruco.detectMarkers(gray, dictionary, corners, ids, parameters);
 
-        if (ids.empty()) {
-            System.out.println("No AR tag detected.");
-            return significantRegions; // return empty
-        }
+        // 2. CLAHE Enhancement
+        CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
+        Mat enhanced = new Mat();
+        clahe.apply(inputImage, enhanced);
 
-        for (int i = 0; i < ids.rows(); i++) {
-            Mat points = corners.get(i);
-            org.opencv.core.Point[] contourPoints = new org.opencv.core.Point[(int) points.total()];
+        // 3. Gaussian Blur
+        Mat blurred = new Mat();
+        Imgproc.GaussianBlur(enhanced, blurred, new Size(5, 5), 0);
 
-            for (int j = 0; j < points.total(); j++) {
-                double[] coords = points.get(0, j);
-                contourPoints[j] = new org.opencv.core.Point(coords[0], coords[1]);
-            }
+        // 4. Canny Edge Detection
+        Mat edges = new Mat();
+        Imgproc.Canny(blurred, edges, 200, 400);
 
-            MatOfPoint matOfPoint = new MatOfPoint(contourPoints);
-            Rect rect = Imgproc.boundingRect(matOfPoint);
+        // 5. Morphological Closing
+        Mat closed = new Mat();
+        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
+        Imgproc.morphologyEx(edges, closed, Imgproc.MORPH_CLOSE, kernel);
 
-            int pad = 250;
-            int x1 = Math.max(rect.x - pad, 0);
-            int y1 = Math.max(rect.y - pad, 0);
-            int x2 = Math.min(rect.x + rect.width + pad, gray.width());
-            int y2 = Math.min(rect.y + rect.height + pad, gray.height());
+        // 6. Find contours
+        List<MatOfPoint> contours = new ArrayList<>();
+        Mat hierarchy = new Mat();
+        Imgproc.findContours(closed, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-            Rect paddedRect = new Rect(x1, y1, x2 - x1, y2 - y1);
-            Mat tagCrop = new Mat(gray, paddedRect);
+        // 7. Filter & crop closed, significant contours
+        for (int j = 0; j < contours.size(); j++) {
+            MatOfPoint cnt = contours.get(j);
+            double area = Imgproc.contourArea(cnt);
 
-            // CLAHE Enhancement
-            CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
-            Mat enhanced = new Mat();
-            clahe.apply(tagCrop, enhanced);
+            if (area < 100 || !isClosedContour(cnt)) continue;
 
-            // Gaussian Blur
-            Mat blurred = new Mat();
-            Imgproc.GaussianBlur(enhanced, blurred, new Size(5, 5), 0);
+            Rect contourRect = Imgproc.boundingRect(cnt);
+            if (contourRect.width < 10 || contourRect.height < 10) continue;
 
-            // Canny Edge Detection
-            Mat edges = new Mat();
-            Imgproc.Canny(blurred, edges, 200, 400);
+            int cx1 = Math.max(contourRect.x - 5, 0);
+            int cy1 = Math.max(contourRect.y - 5, 0);
+            int cx2 = Math.min(contourRect.x + contourRect.width + 5, inputImage.width());
+            int cy2 = Math.min(contourRect.y + contourRect.height + 5, inputImage.height());
 
-            // Morphological Closing
-            Mat closed = new Mat();
-            Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
-            Imgproc.morphologyEx(edges, closed, Imgproc.MORPH_CLOSE, kernel);
-
-            List<MatOfPoint> contours = new ArrayList<>();
-            Mat hierarchy = new Mat();
-            Imgproc.findContours(closed, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-
-            for (int j = 0; j < contours.size(); j++) {
-                MatOfPoint cnt = contours.get(j);
-                double area = Imgproc.contourArea(cnt);
-
-                if (area < 100 || !isClosedContour(cnt)) continue;
-
-                Rect contourRect = Imgproc.boundingRect(cnt);
-                if (contourRect.width < 10 || contourRect.height < 10) continue;
-
-                int cx1 = Math.max(contourRect.x - 5, 0);
-                int cy1 = Math.max(contourRect.y - 5, 0);
-                int cx2 = Math.min(contourRect.x + contourRect.width + 5, tagCrop.width());
-                int cy2 = Math.min(contourRect.y + contourRect.height + 5, tagCrop.height());
-
-                if (cx2 > cx1 && cy2 > cy1) {
-                    Mat croppedRegion = new Mat(tagCrop, new Rect(cx1, cy1, cx2 - cx1, cy2 - cy1));
-                    api.saveMatImage(croppedRegion, "contour_" + j + ".png");
-                    significantRegions.add(croppedRegion);
-                }
+            if (cx2 > cx1 && cy2 > cy1) {
+                Mat croppedRegion = new Mat(inputImage, new Rect(cx1, cy1, cx2 - cx1, cy2 - cy1));
+                api.saveMatImage(croppedRegion, "contour_" + j + ".png");
+                significantRegions.add(croppedRegion);
             }
         }
 
@@ -352,7 +333,7 @@ public class YourService extends KiboRpcService {
         org.opencv.core.Point[] pts = cnt.toArray();
         if (pts.length < 2) return false;
         double distance = Math.sqrt(Math.pow(pts[0].x - pts[pts.length - 1].x, 2) + Math.pow(pts[0].y - pts[pts.length - 1].y, 2));
-        return distance < 20;
+        return distance < 19;
     }
 
     // Utility method
