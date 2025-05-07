@@ -61,7 +61,7 @@ public class YourService extends KiboRpcService {
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.0, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.9, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
-                new Pair<>(new Point(10.9, -7.25, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
+                new Pair<>(new Point(10.9, -7.5, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
                 new Pair<>(new Point(10.6, -6.76, 4.96), new Quaternion(0f, 0f, 1, 0))
         ));
 //        ArrayList<Pair<Point, Quaternion>> oasisCenters = new ArrayList<>(Arrays.asList(
@@ -87,8 +87,8 @@ public class YourService extends KiboRpcService {
         Mat image;
         double[][] cropParams = {
                 {0.0, 0.0, 0.0, 0.1},  // Area 1
-                {0.0, 0.0, 0.20, 0.20}, // Area 2
-                {0.0, 0.0, 0.0, 0.50},  // Area 3
+                {0.0, 0.0, 0.25, 0.25}, // Area 2
+                {0.0, 0.0, 0.2, 0.2},  // Area 3
                 {0.2, 0.0, 0.2, 0.2}   // Area 4
         };
         //--------------------------------------------- MISSION START -------------------------------------------------------
@@ -118,14 +118,17 @@ public class YourService extends KiboRpcService {
             // move and rotate using AR tag's info
             Pair<Point, Quaternion> goal = computeTagApproachPose(image);
             if (goal != null) {
-                if(i == 4){
+                if ( i == 1){
+                    dst = new Point(goal.first.getX() , -10.2, goal.first.getZ());
+                }
+                else if (i == 3){
                     dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
-                }else if (i == 3){
-                    dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY() - 0.5, goal.first.getZ());
-                    api.flashlightControlFront(0.5f);
+                    api.flashlightControlFront(1f);
+                }else if(i == 4){
+                    dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
                 }
                 else{
-                    dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
+                    dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.2), areaCenters.get(i).first.getZ());
                 }
 
                 System.out.println("Area " + i +" Next Coordinate: " +dst.toString());
@@ -136,6 +139,10 @@ public class YourService extends KiboRpcService {
 
             // Pre-processing
             image = api.getMatNavCam();
+
+
+            api.flashlightControlFront(0f);
+
             image = undistortedImage(image);
             api.saveMatImage(image, "undistorted_area_" + id + ".png");
             double top = cropParams[i][0];
@@ -665,7 +672,7 @@ public class YourService extends KiboRpcService {
 
     // Model
     private void loadModel() throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd("cls_model_v2.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("best_float32.tflite");
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = inputStream.getChannel();
         long startOffset = fileDescriptor.getStartOffset();
