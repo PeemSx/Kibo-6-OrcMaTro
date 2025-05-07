@@ -60,36 +60,16 @@ public class YourService extends KiboRpcService {
         Point dst;
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.0, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
-                new Pair<>(new Point(10.9, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
-                new Pair<>(new Point(10.9, -7.4, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
+                new Pair<>(new Point(10.75, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
+                new Pair<>(new Point(11.0, -7.3, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
                 new Pair<>(new Point(10.6, -6.76, 4.96), new Quaternion(0f, 0f, 1, 0))
         ));
-//        ArrayList<Pair<Point, Quaternion>> oasisCenters = new ArrayList<>(Arrays.asList(
-//                new Pair<>(
-//                        new Point(10.925, -9.85, 4.695),      //  (10.425+11.425)/2 , (-10.2-9.5)/2 , (4.445+4.945)/2
-//                        new Quaternion(0f, 0f, -0.707f, 0.707f)
-//                ),
-//                new Pair<>(
-//                        new Point(11.175, -8.975, 5.195),      //  (10.925+11.425)/2 , (-9.5-8.45)/2 , (4.945+5.445)/2
-//                        new Quaternion(0f, 0.707f, 0f, 0.707f)
-//                ),
-//
-//                new Pair<>(
-//                        new Point(10.700, -7.925, 5.195),      //  (10.425+10.975)/2 , (-8.45-7.4)/2 , (4.945+5.445)/2
-//                        new Quaternion(0f, 0f, -0.707f, 0.707f)
-//                ),
-//
-//                new Pair<>(
-//                        new Point(11.175, -6.875, 4.685),      //  (10.925+11.425)/2 , (-7.4-6.35)/2 , (4.425+4.945)/2
-//                        new Quaternion(0f, 0.707f, 0f, 0.707f)
-//                )
-//        ));
         Mat image;
         double[][] cropParams = {
                 {0.0, 0.0, 0.0, 0.1},  // Area 1
-                {0.0, 0.0, 0.25, 0.25}, // Area 2
-                {0.0, 0.0, 0.2, 0.2},  // Area 3
-                {0.2, 0.0, 0.2, 0.2}   // Area 4
+                {0.0, 0.0, 0.1, 0.25}, // Area 2
+                {0.0, 0.0, 0.125, 0.4},  // Area 3
+                {0.0, 0.0, 0.4, 0.1}   // Area 4
         };
         //--------------------------------------------- MISSION START -------------------------------------------------------
         //--------------------------------------------- Area Exploring -------------------------------------------------------
@@ -105,33 +85,31 @@ public class YourService extends KiboRpcService {
 
         for (int i = 0; i < 4; i++) {
             moveToWithCheck(areaCenters.get(i).first, areaCenters.get(i).second, false);
-            id = 100 + i;
+            id = 101 + i;
             // Take a picture of the area
             image = api.getMatNavCam();
 //            id = readAR(image);
             api.saveMatImage(image, "area_" + id + ".png");
-            // re-take the picture if the id is incorrect
-//            if (id < 0 || id > 4) {
-//                image = api.getMatNavCam();
-//                id = readAR(image);
-//            }
+
 
             // move and rotate using AR tag's info
             Pair<Point, Quaternion> goal = computeTagApproachPose(image);
             if (goal != null) {
-                if ( i == 1){
-                    dst = new Point(goal.first.getX() , -10.0, goal.first.getZ());
+                switch (id) {
+                    case 101:
+                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
+                        break;
+                    case 103:
+                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
+                        api.flashlightControlFront(0.3f);
+                        break;
+                    case 104:
+                        dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
+                        break;
+                    default:
+                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(i).first.getZ());
+                        break;
                 }
-                else if (i == 3){
-                    dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
-                    api.flashlightControlFront(1f);
-                }else if(i == 4){
-                    dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
-                }
-                else{
-                    dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(i).first.getZ());
-                }
-
                 System.out.println("Area " + i +" Next Coordinate: " +dst.toString());
                 moveToWithCheck(dst, areaCenters.get(i).second, false);
             } else {
@@ -141,8 +119,9 @@ public class YourService extends KiboRpcService {
             // Pre-processing
             image = api.getMatNavCam();
 
-
-            api.flashlightControlFront(0f);
+            if (id == 103){
+                api.flashlightControlFront(0f);
+            }
 
             image = undistortedImage(image);
             api.saveMatImage(image, "undistorted_area_" + id + ".png");
@@ -166,24 +145,9 @@ public class YourService extends KiboRpcService {
         // complete exploring 4 areas
         api.reportRoundingCompletion();
 
-//        image = api.getMatNavCam();
-//        Pair<Point, Quaternion> goal = computeTagApproachPose(image);
-//        if (goal != null) {
-//            Point dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
-//            api.moveTo(dst, areaCenters.get(i).second, false);
-//        } else {
-//            System.out.println("❌ AR tag pose not computed — skipping movement.");
-//        }
-
-        /* ******************************************************************************** */
-//        try {
-//            Thread.sleep(2000); // 1000 ms = 1 second
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//        }
         //------------------------------------------------- Treasure Finding ---------------------------------------------------\
         // Move to the Astronaut
-        Point point = new Point(11.243d, -6.7607d, 4.9654d);
+        Point point = new Point(11.243d, -6.4607d, 4.9654d);
         Quaternion quaternion = new Quaternion(0f, 0f, 0.707f, 0.707f);
         moveToWithCheck(point, quaternion, false);
 
@@ -191,7 +155,7 @@ public class YourService extends KiboRpcService {
         image = api.getMatNavCam();
         api.saveMatImage(image, "target_area.png");
         image = undistortedImage(image);
-        image = cropArea(image, 0.2, 0.2, 0.2, 0.4);
+        image = cropArea(image, 0.2, 0.2, 0.1, 0.4);
         api.saveMatImage(image, "cropped_target_area.png");
         String treasure = findTheTreasure(image);
 
@@ -213,7 +177,6 @@ public class YourService extends KiboRpcService {
         }
 
         api.notifyRecognitionItem();
-
         // --------------- re-check the found items ---------------------
         for (int i = 0; i < foundItemsPerArea.size(); i++) {
             Map<String, Integer> areaMap = foundItemsPerArea.get(i);
@@ -223,8 +186,6 @@ public class YourService extends KiboRpcService {
             }
         }
 
-
-
         if(treasureArea != -1){
             moveToWithCheck(areaCenters.get(treasureArea).first, areaCenters.get(treasureArea).second, false);
         }else {
@@ -232,8 +193,6 @@ public class YourService extends KiboRpcService {
         }
 
         api.takeTargetItemSnapshot();
-
-
     }
 
     @Override
@@ -673,7 +632,7 @@ public class YourService extends KiboRpcService {
 
     // Model
     private void loadModel() throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd("best_float32.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("cls_model_v2.tflite");
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = inputStream.getChannel();
         long startOffset = fileDescriptor.getStartOffset();
