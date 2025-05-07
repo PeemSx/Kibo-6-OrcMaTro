@@ -61,7 +61,7 @@ public class YourService extends KiboRpcService {
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.0, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.9, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
-                new Pair<>(new Point(10.9, -7.5, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
+                new Pair<>(new Point(10.9, -7.4, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
                 new Pair<>(new Point(10.6, -6.76, 4.96), new Quaternion(0f, 0f, 1, 0))
         ));
 //        ArrayList<Pair<Point, Quaternion>> oasisCenters = new ArrayList<>(Arrays.asList(
@@ -105,21 +105,22 @@ public class YourService extends KiboRpcService {
 
         for (int i = 0; i < 4; i++) {
             moveToWithCheck(areaCenters.get(i).first, areaCenters.get(i).second, false);
+            id = 100 + i;
             // Take a picture of the area
             image = api.getMatNavCam();
-            id = readAR(image);
+//            id = readAR(image);
             api.saveMatImage(image, "area_" + id + ".png");
             // re-take the picture if the id is incorrect
-            if (id < 0 || id > 4) {
-                image = api.getMatNavCam();
-                id = readAR(image);
-            }
+//            if (id < 0 || id > 4) {
+//                image = api.getMatNavCam();
+//                id = readAR(image);
+//            }
 
             // move and rotate using AR tag's info
             Pair<Point, Quaternion> goal = computeTagApproachPose(image);
             if (goal != null) {
                 if ( i == 1){
-                    dst = new Point(goal.first.getX() , -10.2, goal.first.getZ());
+                    dst = new Point(goal.first.getX() , -10.0, goal.first.getZ());
                 }
                 else if (i == 3){
                     dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
@@ -128,7 +129,7 @@ public class YourService extends KiboRpcService {
                     dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
                 }
                 else{
-                    dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.2), areaCenters.get(i).first.getZ());
+                    dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(i).first.getZ());
                 }
 
                 System.out.println("Area " + i +" Next Coordinate: " +dst.toString());
