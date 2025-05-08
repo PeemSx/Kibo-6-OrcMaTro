@@ -148,7 +148,7 @@ public class YourService extends KiboRpcService {
         // complete exploring 4 areas
         //------------------------------------------------- Treasure Finding ---------------------------------------------------\
         // Move to the Astronaut
-        Point point = new Point(11.1d, -6.4d, 4.965d);
+        Point point = new Point(11.1d, -6.7d, 4.965d);
         Quaternion quaternion = new Quaternion(0f, 0f, 0.707f, 0.707f);
         moveToWithCheck(point, quaternion, false);
         api.reportRoundingCompletion();
@@ -613,7 +613,7 @@ public class YourService extends KiboRpcService {
 
     // Model
     private void loadModel() throws IOException {
-        AssetFileDescriptor fileDescriptor = getAssets().openFd("cls_model_v2.tflite");
+        AssetFileDescriptor fileDescriptor = getAssets().openFd("new_CLS.tflite");
         FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
         FileChannel fileChannel = inputStream.getChannel();
         long startOffset = fileDescriptor.getStartOffset();
