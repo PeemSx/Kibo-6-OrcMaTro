@@ -196,9 +196,12 @@ public class YourService extends KiboRpcService {
         if(treasureArea != -1){
             moveToWithCheck(areaCenters.get(treasureArea).first, areaCenters.get(treasureArea).second, false);
             image = api.getMatNavCam();
+            api.saveMatImage(image, "treasure_area_first.png");
             Pair<Point, Quaternion> goal = computeTagApproachPose(image);
             if (goal != null){
-                moveToWithCheck(goal.first, goal.second, false);
+                moveToWithCheck(goal.first, areaCenters.get(treasureArea).second, false);
+                image = api.getMatNavCam();
+                api.saveMatImage(image, "treasure_area_AR.png");
             }
 
         }else {
