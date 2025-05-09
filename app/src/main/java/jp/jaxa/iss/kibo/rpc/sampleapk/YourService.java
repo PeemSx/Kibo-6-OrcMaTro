@@ -198,23 +198,24 @@ public class YourService extends KiboRpcService {
             Pair<Point, Quaternion> goal = computeTagApproachPose(image);
 
             if (goal != null) {
-                switch (treasureArea) {
-                    case 1:
-                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
-                        break;
-                    case 3:
-                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(treasureArea).first.getZ());
-                        break;
-                    case 4:
-                        dst = new Point(areaCenters.get(treasureArea).first.getX(), goal.first.getY(), goal.first.getZ());
-                        break;
-                    default:
-                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(treasureArea).first.getZ());
-                        break;
-                }
+//                switch (treasureArea) {
+//                    case 1:
+//                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
+//                        break;
+//                    case 3:
+//                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(treasureArea).first.getZ());
+//                        break;
+//                    case 4:
+//                        dst = new Point(areaCenters.get(treasureArea).first.getX(), goal.first.getY(), goal.first.getZ());
+//                        break;
+//                    default:
+//                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(treasureArea).first.getZ());
+//                        break;
+//                }
 
-                System.out.println("Area " + treasureArea +" Next Coordinate: " +dst.toString());
-                moveToWithCheck(dst, areaCenters.get(treasureArea).second, false);
+                System.out.println("Area " + treasureArea +" Next Coordinate: " +goal.toString());
+//                moveToWithCheck(dst, areaCenters.get(treasureArea).second, false);
+                moveToWithCheck(goal.first, goal.second, false);
                 image = api.getMatNavCam();
                 api.saveMatImage(image, "treasure_area_AR.png");
 
@@ -417,6 +418,7 @@ public class YourService extends KiboRpcService {
         Aruco.estimatePoseSingleMarkers(corners, markerLength, K, distCoeffs, rvecs, tvecs);
         if (rvecs.empty() || tvecs.empty()) return null;
 
+        // Use first marker
         Mat rvec = new Mat(3, 1, CvType.CV_64F);
         Mat tvec = new Mat(3, 1, CvType.CV_64F);
         double[] tRaw = tvecs.get(0, 0);
@@ -448,31 +450,35 @@ public class YourService extends KiboRpcService {
         T_world_to_cam.put(1, 3, pos.getY());
         T_world_to_cam.put(2, 3, pos.getZ());
 
-        // Step 6: Multiply to get tag pose in world frame
+        // Step 6: Compute T_world_to_tag
         Mat T_world_to_tag = new Mat();
         Core.gemm(T_world_to_cam, T_cam_to_tag, 1, new Mat(), 0, T_world_to_tag);
 
-        // Step 7: Retreat based on area direction
-        int areaId = (int) ids.get(0, 0)[0];
-        areaId = areaId % 10;  // e.g., 101 % 10 = 1
-
+        int areaId = (int) ids.get(0, 0)[0] % 10;
         Mat offset = Mat.zeros(4, 1, CvType.CV_64F);
+
         switch (areaId) {
-            case 1: offset.put(1, 0, 0.3); break; // +Y
+            case 1:
+                offset.put(1, 0, 0.7);  // +Y → away from back wall
+                break;
             case 2:
             case 3:
-                offset.put(2, 0, 0.3); break; // +Z
-            case 4: offset.put(0, 0, 0.3); break; // +X
+                offset.put(2, 0, -0.7); // -Z → away from ceiling (downward)
+                break;
+            case 4:
+                offset.put(0, 0, 0.7);  // +X → away from side wall
+                break;
         }
         offset.put(3, 0, 1.0);
 
-        Mat tagCameraPose = new Mat();
-        Core.gemm(T_world_to_tag, offset, 1, new Mat(), 0, tagCameraPose);
+        // Step 8: Multiply to get target world coordinate
+        Mat tagApproachWorldPose = new Mat();
+        Core.gemm(T_world_to_tag, offset, 1, new Mat(), 0, tagApproachWorldPose);
 
         Point finalPosition = new Point(
-                tagCameraPose.get(0, 0)[0],
-                tagCameraPose.get(1, 0)[0],
-                tagCameraPose.get(2, 0)[0]
+                tagApproachWorldPose.get(0, 0)[0],
+                tagApproachWorldPose.get(1, 0)[0],
+                tagApproachWorldPose.get(2, 0)[0]
         );
         Mat R_tag = T_world_to_tag.submat(0, 3, 0, 3);
         Quaternion finalOrientation = rotationMatrixToQuaternion(R_tag);
@@ -610,7 +616,7 @@ public class YourService extends KiboRpcService {
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
         areaId = areaId % 10;
         // Detect and classify items
-        List<Mat> croppedImages = CroppedContours(image, 20);
+        List<Mat> croppedImages = CroppedContours(image, 23);
         Map<String, Integer> itemCounts = new HashMap<>();
 
         for (Mat region : croppedImages) {
