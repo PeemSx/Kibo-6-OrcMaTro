@@ -148,9 +148,7 @@ public class YourService extends KiboRpcService {
         // complete exploring 4 areas
         //------------------------------------------------- Treasure Finding ---------------------------------------------------\
         // Move to the Astronaut
-        Point point = new Point(11.1d, -6.7d, 4.965d);
-        Quaternion quaternion = new Quaternion(0f, 0f, 0.707f, 0.707f);
-        moveToWithCheck(point, quaternion, false);
+        moveToAstronaut();
         api.reportRoundingCompletion();
 
         try {
@@ -162,7 +160,7 @@ public class YourService extends KiboRpcService {
         image = api.getMatNavCam();
         api.saveMatImage(image, "target_area.png");
         image = undistortedImage(image);
-        image = cropArea(image, 0.2, 0.2, 0.25, 0.25);
+        image = cropArea(image, 0.25, 0.2, 0.27, 0.25);
         api.saveMatImage(image, "cropped_target_area.png");
         String treasure = findTheTreasure(image);
 
@@ -198,11 +196,32 @@ public class YourService extends KiboRpcService {
             image = api.getMatNavCam();
             api.saveMatImage(image, "treasure_area_first.png");
             Pair<Point, Quaternion> goal = computeTagApproachPose(image);
-            if (goal != null){
-                moveToWithCheck(goal.first, areaCenters.get(treasureArea).second, false);
+
+            if (goal != null) {
+                switch (treasureArea) {
+                    case 1:
+                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
+                        break;
+                    case 3:
+                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(treasureArea).first.getZ());
+                        break;
+                    case 4:
+                        dst = new Point(areaCenters.get(treasureArea).first.getX(), goal.first.getY(), goal.first.getZ());
+                        break;
+                    default:
+                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(treasureArea).first.getZ());
+                        break;
+                }
+
+                System.out.println("Area " + treasureArea +" Next Coordinate: " +dst.toString());
+                moveToWithCheck(dst, areaCenters.get(treasureArea).second, false);
                 image = api.getMatNavCam();
                 api.saveMatImage(image, "treasure_area_AR.png");
+
+            } else {
+                System.out.println("❌ AR tag pose not computed — skipping movement.");
             }
+
 
         }else {
             System.out.println("Treasure Area NOT found");
@@ -254,6 +273,12 @@ public class YourService extends KiboRpcService {
         }
     }
 
+    private void moveToAstronaut(){
+        Point point = new Point(11.1d, -6.7d, 4.965d);
+        Quaternion quaternion = new Quaternion(0f, 0f, 0.707f, 0.707f);
+        moveToWithCheck(point, quaternion, false);
+    }
+
     // Image Processing
     private Mat undistortedImage(Mat inputImage) {
         // Resize
@@ -280,9 +305,8 @@ public class YourService extends KiboRpcService {
         return validArea;
     }
 
-    private List<Mat> CroppedContours(Mat inputImage) {
+    private List<Mat> CroppedContours(Mat inputImage, float tolerance) {
         List<Mat> significantRegions = new ArrayList<>();
-
 
         // 2. CLAHE Enhancement
         CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
@@ -312,7 +336,7 @@ public class YourService extends KiboRpcService {
             MatOfPoint cnt = contours.get(j);
             double area = Imgproc.contourArea(cnt);
 
-            if (area < 100 || !isClosedContour(cnt)) continue;
+            if (area < 100 || !isClosedContour(cnt, tolerance)) continue;
 
             Rect contourRect = Imgproc.boundingRect(cnt);
             if (contourRect.width < 10 || contourRect.height < 10) continue;
@@ -332,11 +356,11 @@ public class YourService extends KiboRpcService {
         return significantRegions;
     }
 
-    private boolean isClosedContour(MatOfPoint cnt) {
+    private boolean isClosedContour(MatOfPoint cnt, float tolerance) {
         org.opencv.core.Point[] pts = cnt.toArray();
         if (pts.length < 2) return false;
         double distance = Math.sqrt(Math.pow(pts[0].x - pts[pts.length - 1].x, 2) + Math.pow(pts[0].y - pts[pts.length - 1].y, 2));
-        return distance < 19;
+        return distance < tolerance;
     }
 
     // Utility method
@@ -568,7 +592,7 @@ public class YourService extends KiboRpcService {
 
     private String findTheTreasure(Mat image){
         String itemType;
-        List<Mat> contourImages = CroppedContours(image);
+        List<Mat> contourImages = CroppedContours(image, 35);
         Set<String> treasureItems = new HashSet<>(Arrays.asList("emerald", "diamond", "crystal"));
 
         for (Mat i : contourImages){
@@ -586,7 +610,7 @@ public class YourService extends KiboRpcService {
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
         areaId = areaId % 10;
         // Detect and classify items
-        List<Mat> croppedImages = CroppedContours(image);
+        List<Mat> croppedImages = CroppedContours(image, 20);
         Map<String, Integer> itemCounts = new HashMap<>();
 
         for (Mat region : croppedImages) {
