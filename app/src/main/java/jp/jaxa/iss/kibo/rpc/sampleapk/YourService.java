@@ -386,6 +386,8 @@ public class YourService extends KiboRpcService {
     }
 
     public Pair<Point, Quaternion> computeTagApproachPose(Mat input_image) {
+
+
         // Step 0: Resize image to match calibration
         Mat resized = new Mat();
         Imgproc.resize(input_image, resized, new Size(1280, 960));
@@ -449,6 +451,19 @@ public class YourService extends KiboRpcService {
                 z += fixedOffset; break;  // Ceiling → downward
             case 4: x += fixedOffset; break;  // Side wall → inward
         }
+        // KIBO Safe Volume — A bit tighter than min/max to avoid grazing edges
+        double xMin = 10.65;
+        double xMax = 11.25;
+
+        double yMin = -10.0;  // Maybe even -10.0 to be safer
+        double yMax = -6.3;
+
+        double zMin = 4.4;
+        double zMax = 5.3;
+
+        x = Math.max(xMin, Math.min(xMax, x));
+        y = Math.max(yMin, Math.min(yMax, y));
+        z = Math.max(zMin, Math.min(zMax, z));
 
         Point finalPos = new Point(x, y, z);
 
