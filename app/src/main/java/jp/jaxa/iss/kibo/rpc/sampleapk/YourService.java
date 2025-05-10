@@ -152,7 +152,7 @@ public class YourService extends KiboRpcService {
         api.reportRoundingCompletion();
 
         try {
-            Thread.sleep(2000); // 1000 ms = 1 second
+            Thread.sleep(3000); // 1000 ms = 1 second
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -160,7 +160,7 @@ public class YourService extends KiboRpcService {
         image = api.getMatNavCam();
         api.saveMatImage(image, "target_area.png");
         image = undistortedImage(image);
-        image = cropArea(image, 0.25, 0.2, 0.27, 0.25);
+        image = cropArea(image, 0.4, 0.4, 0.4, 0.4);
         api.saveMatImage(image, "cropped_target_area.png");
         String treasure = findTheTreasure(image);
 
@@ -215,7 +215,7 @@ public class YourService extends KiboRpcService {
 
                 System.out.println("Area " + treasureArea +" Next Coordinate: " +goal.toString());
 //                moveToWithCheck(dst, areaCenters.get(treasureArea).second, false);
-                moveToWithCheck(goal.first, goal.second, false);
+                moveToWithCheck(goal.first, areaCenters.get(treasureArea).second, false);
                 image = api.getMatNavCam();
                 api.saveMatImage(image, "treasure_area_AR.png");
 
@@ -402,7 +402,7 @@ public class YourService extends KiboRpcService {
             return null;
         }
 
-        // Step 2: Estimate pose
+        // Step 2: Estimate pose (for position only)
         Mat rvecs = new Mat();
         Mat tvecs = new Mat();
         float markerLength = 0.05f;
@@ -416,74 +416,46 @@ public class YourService extends KiboRpcService {
                 -0.164787, 0.020375, -0.001572, -0.000369, 0.0
         );
         Aruco.estimatePoseSingleMarkers(corners, markerLength, K, distCoeffs, rvecs, tvecs);
-        if (rvecs.empty() || tvecs.empty()) return null;
+        if (tvecs.empty()) return null;
 
-        // Use first marker
-        Mat rvec = new Mat(3, 1, CvType.CV_64F);
-        Mat tvec = new Mat(3, 1, CvType.CV_64F);
+        // Step 3: Extract tag position in camera frame
         double[] tRaw = tvecs.get(0, 0);
-        double[] rRaw = rvecs.get(0, 0);
-        for (int i = 0; i < 3; i++) {
-            tvec.put(i, 0, tRaw[i]);
-            rvec.put(i, 0, rRaw[i]);
-        }
+        Mat tvec = new Mat(3, 1, CvType.CV_64F);
+        for (int i = 0; i < 3; i++) tvec.put(i, 0, tRaw[i]);
 
-        // Step 3: Convert rvec to rotation matrix
-        Mat R_cam_to_tag = new Mat();
-        Calib3d.Rodrigues(rvec, R_cam_to_tag);
-
-        // Step 4: Build T_cam_to_tag [4x4]
-        Mat T_cam_to_tag = Mat.eye(4, 4, CvType.CV_64F);
-        R_cam_to_tag.copyTo(T_cam_to_tag.submat(0, 3, 0, 3));
-        for (int i = 0; i < 3; i++) {
-            T_cam_to_tag.put(i, 3, tvec.get(i, 0)[0]);
-        }
-
-        // Step 5: Get T_world_to_cam from Kinematics
+        // Step 4: Convert camera to world
         Kinematics kin = api.getRobotKinematics();
-        Point pos = kin.getPosition();
-        Quaternion quat = kin.getOrientation();
-        Mat R_world_to_cam = quaternionToRotationMatrix(quat);
-        Mat T_world_to_cam = Mat.eye(4, 4, CvType.CV_64F);
-        R_world_to_cam.copyTo(T_world_to_cam.submat(0, 3, 0, 3));
-        T_world_to_cam.put(0, 3, pos.getX());
-        T_world_to_cam.put(1, 3, pos.getY());
-        T_world_to_cam.put(2, 3, pos.getZ());
+        Point camPos = kin.getPosition();
+        Quaternion camQuat = kin.getOrientation();
+        Mat R_world_cam = quaternionToRotationMatrix(camQuat);
 
-        // Step 6: Compute T_world_to_tag
-        Mat T_world_to_tag = new Mat();
-        Core.gemm(T_world_to_cam, T_cam_to_tag, 1, new Mat(), 0, T_world_to_tag);
+        // Transform tag position from camera to world
+        Mat tagPosWorld = new Mat(3, 1, CvType.CV_64F);
+        Core.gemm(R_world_cam, tvec, 1, new Mat(), 0, tagPosWorld);
+        tagPosWorld.put(0, 0, tagPosWorld.get(0, 0)[0] + camPos.getX());
+        tagPosWorld.put(1, 0, tagPosWorld.get(1, 0)[0] + camPos.getY());
+        tagPosWorld.put(2, 0, tagPosWorld.get(2, 0)[0] + camPos.getZ());
 
+        // Step 5: Apply manual offset in world frame
         int areaId = (int) ids.get(0, 0)[0] % 10;
-        Mat offset = Mat.zeros(4, 1, CvType.CV_64F);
-
+        double x = tagPosWorld.get(0, 0)[0];
+        double y = tagPosWorld.get(1, 0)[0];
+        double z = tagPosWorld.get(2, 0)[0];
+        float fixedOffset = 0.35f;
         switch (areaId) {
-            case 1:
-                offset.put(1, 0, 0.7);  // +Y → away from back wall
-                break;
+            case 1: y += fixedOffset; break;  // Back wall → forward
             case 2:
             case 3:
-                offset.put(2, 0, -0.7); // -Z → away from ceiling (downward)
-                break;
-            case 4:
-                offset.put(0, 0, 0.7);  // +X → away from side wall
-                break;
+                z += fixedOffset; break;  // Ceiling → downward
+            case 4: x += fixedOffset; break;  // Side wall → inward
         }
-        offset.put(3, 0, 1.0);
 
-        // Step 8: Multiply to get target world coordinate
-        Mat tagApproachWorldPose = new Mat();
-        Core.gemm(T_world_to_tag, offset, 1, new Mat(), 0, tagApproachWorldPose);
+        Point finalPos = new Point(x, y, z);
 
-        Point finalPosition = new Point(
-                tagApproachWorldPose.get(0, 0)[0],
-                tagApproachWorldPose.get(1, 0)[0],
-                tagApproachWorldPose.get(2, 0)[0]
-        );
-        Mat R_tag = T_world_to_tag.submat(0, 3, 0, 3);
-        Quaternion finalOrientation = rotationMatrixToQuaternion(R_tag);
+        // Step 6: Use fixed orientation (e.g., forward-facing)
+        Quaternion fixedQuat = new Quaternion(0f, 0f, 0.707f, 0.707f); // Facing +X
 
-        return new Pair<>(finalPosition, finalOrientation);
+        return new Pair<>(finalPos, fixedQuat);
     }
 
     private Mat quaternionToRotationMatrix(Quaternion q) {
@@ -616,7 +588,7 @@ public class YourService extends KiboRpcService {
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
         areaId = areaId % 10;
         // Detect and classify items
-        List<Mat> croppedImages = CroppedContours(image, 23);
+        List<Mat> croppedImages = CroppedContours(image, 19);
         Map<String, Integer> itemCounts = new HashMap<>();
 
         for (Mat region : croppedImages) {
