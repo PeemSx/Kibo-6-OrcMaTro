@@ -49,6 +49,8 @@ import android.content.res.AssetFileDescriptor;
 public class YourService extends KiboRpcService {
 
     private Interpreter tflite;
+    private double lastTagDistance = -1;
+    private double lastCameraAngle = -1;
 
     @Override
     protected void runPlan1(){
@@ -57,7 +59,6 @@ public class YourService extends KiboRpcService {
         List<Map<String, Integer>> foundItemsPerArea = new ArrayList<>();
         List<Mat> areaImages = new ArrayList<>();
         int id;
-        Point dst;
         ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
                 new Pair<>(new Point(11.0, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
                 new Pair<>(new Point(10.75, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
@@ -92,33 +93,10 @@ public class YourService extends KiboRpcService {
             api.saveMatImage(image, "area_" + id + ".png");
 
 
-            // move and rotate using AR tag's info
-//            Pair<Point, Quaternion> goal = computeTagApproachPose(image);
-//            if (goal != null) {
-//                switch (id) {
-//                    case 101:
-//                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
-//                        break;
-//                    case 103:
-//                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(i).first.getZ());
-//                        api.flashlightControlFront(0.3f);
-//                        break;
-//                    case 104:
-//                        dst = new Point(areaCenters.get(i).first.getX(), goal.first.getY(), goal.first.getZ());
-//                        break;
-//                    default:
-//                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(i).first.getZ());
-//                        break;
-//                }
-//                System.out.println("Area " + i +" Next Coordinate: " +dst.toString());
-//                moveToWithCheck(dst, areaCenters.get(i).second, false);
-//            } else {
-//                System.out.println("❌ AR tag pose not computed — skipping movement.");
-//            }
-
             if (id == 103){
                 api.flashlightControlFront(0.35f);
             }
+
             // Pre-processing
             image = api.getMatNavCam();
 
@@ -194,10 +172,12 @@ public class YourService extends KiboRpcService {
         if(treasureArea != -1){
             moveToWithCheck(areaCenters.get(treasureArea).first, areaCenters.get(treasureArea).second, false);
             image = api.getMatNavCam();
-            api.saveMatImage(image, "treasure_area_first.png");
-            Pair<Point, Quaternion> goal = computeTagApproachPose(image);
+            api.saveMatImage(undistortedImage(image), "treasure_area_first.png");
+            Pair<Point, Quaternion> goal = computePerpendicularPose(image, treasureArea + 1, 0.0);
+
 
             if (goal != null) {
+//                Point dst;
 //                switch (treasureArea) {
 //                    case 1:
 //                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
@@ -217,7 +197,7 @@ public class YourService extends KiboRpcService {
 //                moveToWithCheck(dst, areaCenters.get(treasureArea).second, false);
                 moveToWithCheck(goal.first, areaCenters.get(treasureArea).second, false);
                 image = api.getMatNavCam();
-                api.saveMatImage(image, "treasure_area_AR.png");
+                api.saveMatImage(undistortedImage(image), "treasure_area_AR.png");
 
             } else {
                 System.out.println("❌ AR tag pose not computed — skipping movement.");
@@ -240,6 +220,7 @@ public class YourService extends KiboRpcService {
     protected void runPlan3(){
         // write your plan 3 here.
     }
+
     private void moveToWithCheck(Point targetPosition, Quaternion targetOrientation, boolean tmp) {
         final double POSITION_TOLERANCE = 0.05; // meters
         final double ORIENTATION_TOLERANCE = 0.1; // cosine of angle difference
@@ -385,93 +366,124 @@ public class YourService extends KiboRpcService {
         return new Mat(input, roi);
     }
 
-    public Pair<Point, Quaternion> computeTagApproachPose(Mat input_image) {
+    private Pair<Point, Quaternion> computePerpendicularPose(Mat rawImage, int areaId, double retreatDist) {
+            // Step 1: Resize & undistort
+            Mat resized = new Mat();
+            Imgproc.resize(rawImage, resized, new Size(1280, 960));
+
+            Mat K = new Mat(3, 3, CvType.CV_64F);
+            K.put(0, 0,
+                    523.105750, 0.000000, 635.434258,
+                    0.000000, 534.765913, 500.335102,
+                    0.000000, 0.000000, 1.000000
+            );
+            MatOfDouble distCoeffs = new MatOfDouble(
+                    -0.164787, 0.020375, -0.001572, -0.000369, 0.0
+            );
+
+            Mat undistorted = new Mat();
+            Calib3d.undistort(resized, undistorted, K, distCoeffs);
+
+            // Step 2: Detect AR tags
+            Dictionary dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_5X5_250);
+            List<Mat> corners = new ArrayList<>();
+            Mat ids = new Mat();
+            DetectorParameters parameters = DetectorParameters.create();
+            Aruco.detectMarkers(undistorted, dictionary, corners, ids, parameters);
+
+            if (ids.empty()) {
+                System.out.println("❌ No AR tag found.");
+                return null;
+            }
+
+            int targetId = 100 + areaId;
+            int tagIndex = -1;
+            for (int i = 0; i < ids.rows(); i++) {
+                if ((int) ids.get(i, 0)[0] == targetId) {
+                    tagIndex = i;
+                    break;
+                }
+            }
+
+            if (tagIndex == -1) {
+                System.out.println("❌ AR tag for Area " + areaId + " (ID=" + targetId + ") not found.");
+                return null;
+            }
+
+            // Step 3: Pose estimation
+            Mat rvecs = new Mat();
+            Mat tvecs = new Mat();
+            Aruco.estimatePoseSingleMarkers(corners, 0.05f, K, distCoeffs, rvecs, tvecs);
+
+            double[] tvecRaw = tvecs.get(tagIndex, 0);
+            Mat tvecCam = new Mat(3, 1, CvType.CV_64F);
+            tvecCam.put(0, 0, tvecRaw[0], tvecRaw[1], tvecRaw[2]);
+
+            Kinematics kin = api.getRobotKinematics();
+            Point camWorld = kin.getPosition();
+            Quaternion camQuat = kin.getOrientation();
+            Mat R = quaternionToRotationMatrix(camQuat);
+
+        // Step 3.5: Debug — compute distance and camera angle
+        double dx = tvecRaw[0];  // right (+X_cam)
+        double dy = tvecRaw[1];  // down (+Y_cam)
+        double dz = tvecRaw[2];  // forward (+Z_cam)
+
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);  // Euclidean
+        double angleRad = Math.atan2(Math.sqrt(dx * dx + dy * dy), dz);  // in radians
+        double angleDeg = Math.toDegrees(angleRad);
+
+        System.out.println("📏 Distance to AR tag: " + String.format("%.3f", distance) + " meters");
+        System.out.println("📐 Camera angle to AR tag: " + String.format("%.2f", angleDeg) + "°");
 
 
-        // Step 0: Resize image to match calibration
-        Mat resized = new Mat();
-        Imgproc.resize(input_image, resized, new Size(1280, 960));
+        // Step 4: Transform tag position to world frame
+            Mat tagWorldOffset = new Mat();
+            Core.gemm(R, tvecCam, 1, new Mat(), 0, tagWorldOffset);
+            double tagX = camWorld.getX() + tagWorldOffset.get(0, 0)[0];
+            double tagY = camWorld.getY() + tagWorldOffset.get(1, 0)[0];
+            double tagZ = camWorld.getZ() + tagWorldOffset.get(2, 0)[0];
 
-        // Step 1: Detect ArUco marker
-        Dictionary dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_5X5_250);
-        List<Mat> corners = new ArrayList<>();
-        Mat ids = new Mat();
-        DetectorParameters parameters = DetectorParameters.create();
-        Aruco.detectMarkers(resized, dictionary, corners, ids, parameters);
+            // Step 5: Get camera forward vector (R * Z_cam)
+            Mat camForward = new Mat(3, 1, CvType.CV_64F);
+            camForward.put(0, 0, 0);
+            camForward.put(1, 0, 0);
+            camForward.put(2, 0, 1);
 
-        if (ids.empty() || corners.isEmpty()) {
-            System.out.println("❌ No AR tag detected or corners missing.");
-            return null;
+            Mat facingDir = new Mat();
+            Core.gemm(R, camForward, 1, new Mat(), 0, facingDir);
+            double fx = facingDir.get(0, 0)[0];
+            double fy = facingDir.get(1, 0)[0];
+            double fz = facingDir.get(2, 0)[0];
+            double norm = Math.sqrt(fx * fx + fy * fy + fz * fz);
+            fx /= norm; fy /= norm; fz /= norm;
+
+            // Step 6: Apply retreat offset
+            double goalX = tagX - retreatDist * fx;
+            double goalY = tagY - retreatDist * fy;
+            double goalZ = tagZ - retreatDist * fz;
+
+            // Step 7: Apply NavCam-to-body offset correction (transform from body to world)
+            Mat camOffset = new Mat(3, 1, CvType.CV_64F);
+            camOffset.put(0, 0, 0.1177);  // Z_cam = forward
+            camOffset.put(1, 0, -0.0422); // Y_cam = downward
+            camOffset.put(2, 0, -0.0826); // X_cam = left
+
+            Mat offsetWorld = new Mat();
+            Core.gemm(R, camOffset, 1, new Mat(), 0, offsetWorld);
+
+            goalX += offsetWorld.get(0, 0)[0];
+            goalY += offsetWorld.get(1, 0)[0];
+            goalZ += offsetWorld.get(2, 0)[0];
+
+            // Step 8: Clamp within KIZ
+            goalX = Math.max(10.65, Math.min(11.25, goalX));
+            goalY = Math.max(-10.0, Math.min(-6.3, goalY));
+            goalZ = Math.max(4.4, Math.min(5.3, goalZ));
+
+            Point goalPos = new Point(goalX, goalY, goalZ);
+            return new Pair<>(goalPos, camQuat);  // Maintain facing direction
         }
-
-        // Step 2: Estimate pose (for position only)
-        Mat rvecs = new Mat();
-        Mat tvecs = new Mat();
-        float markerLength = 0.05f;
-        Mat K = new Mat(3, 3, CvType.CV_64F);
-        K.put(0, 0,
-                523.105750, 0.000000, 635.434258,
-                0.000000, 534.765913, 500.335102,
-                0.000000, 0.000000, 1.000000
-        );
-        MatOfDouble distCoeffs = new MatOfDouble(
-                -0.164787, 0.020375, -0.001572, -0.000369, 0.0
-        );
-        Aruco.estimatePoseSingleMarkers(corners, markerLength, K, distCoeffs, rvecs, tvecs);
-        if (tvecs.empty()) return null;
-
-        // Step 3: Extract tag position in camera frame
-        double[] tRaw = tvecs.get(0, 0);
-        Mat tvec = new Mat(3, 1, CvType.CV_64F);
-        for (int i = 0; i < 3; i++) tvec.put(i, 0, tRaw[i]);
-
-        // Step 4: Convert camera to world
-        Kinematics kin = api.getRobotKinematics();
-        Point camPos = kin.getPosition();
-        Quaternion camQuat = kin.getOrientation();
-        Mat R_world_cam = quaternionToRotationMatrix(camQuat);
-
-        // Transform tag position from camera to world
-        Mat tagPosWorld = new Mat(3, 1, CvType.CV_64F);
-        Core.gemm(R_world_cam, tvec, 1, new Mat(), 0, tagPosWorld);
-        tagPosWorld.put(0, 0, tagPosWorld.get(0, 0)[0] + camPos.getX());
-        tagPosWorld.put(1, 0, tagPosWorld.get(1, 0)[0] + camPos.getY());
-        tagPosWorld.put(2, 0, tagPosWorld.get(2, 0)[0] + camPos.getZ());
-
-        // Step 5: Apply manual offset in world frame
-        int areaId = (int) ids.get(0, 0)[0] % 10;
-        double x = tagPosWorld.get(0, 0)[0];
-        double y = tagPosWorld.get(1, 0)[0];
-        double z = tagPosWorld.get(2, 0)[0];
-        float fixedOffset = 0.35f;
-        switch (areaId) {
-            case 1: y += fixedOffset; break;  // Back wall → forward
-            case 2:
-            case 3:
-                z += fixedOffset; break;  // Ceiling → downward
-            case 4: x += fixedOffset; break;  // Side wall → inward
-        }
-        // KIBO Safe Volume — A bit tighter than min/max to avoid grazing edges
-        double xMin = 10.65;
-        double xMax = 11.25;
-
-        double yMin = -10.0;  // Maybe even -10.0 to be safer
-        double yMax = -6.3;
-
-        double zMin = 4.4;
-        double zMax = 5.3;
-
-        x = Math.max(xMin, Math.min(xMax, x));
-        y = Math.max(yMin, Math.min(yMax, y));
-        z = Math.max(zMin, Math.min(zMax, z));
-
-        Point finalPos = new Point(x, y, z);
-
-        // Step 6: Use fixed orientation (e.g., forward-facing)
-        Quaternion fixedQuat = new Quaternion(0f, 0f, 0.707f, 0.707f); // Facing +X
-
-        return new Pair<>(finalPos, fixedQuat);
-    }
 
     private Mat quaternionToRotationMatrix(Quaternion q) {
         float x = q.getX(), y = q.getY(), z = q.getZ(), w = q.getW();
@@ -585,7 +597,7 @@ public class YourService extends KiboRpcService {
 
     private String findTheTreasure(Mat image){
         String itemType;
-        List<Mat> contourImages = CroppedContours(image, 35);
+        List<Mat> contourImages = CroppedContours(image, 40);
         Set<String> treasureItems = new HashSet<>(Arrays.asList("emerald", "diamond", "crystal"));
 
         for (Mat i : contourImages){
@@ -603,7 +615,7 @@ public class YourService extends KiboRpcService {
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
         areaId = areaId % 10;
         // Detect and classify items
-        List<Mat> croppedImages = CroppedContours(image, 19);
+        List<Mat> croppedImages = CroppedContours(image, 15);
         Map<String, Integer> itemCounts = new HashMap<>();
 
         for (Mat region : croppedImages) {
