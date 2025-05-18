@@ -42,172 +42,125 @@ import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
 import android.content.res.AssetFileDescriptor;
 
-/**
- * Class meant to handle commands from the Ground Data System and execute them in Astrobee.
- */
-
 public class YourService extends KiboRpcService {
 
     private Interpreter tflite;
-    private double lastTagDistance = -1;
-    private double lastCameraAngle = -1;
-
     @Override
     protected void runPlan1(){
-        //--------------------------------------------- Variables Declaration -------------------------------------------------------
-
-        List<Map<String, Integer>> foundItemsPerArea = new ArrayList<>();
-        List<Mat> areaImages = new ArrayList<>();
-        int id;
-        ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
-                new Pair<>(new Point(11.0, -10.00, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),
-                new Pair<>(new Point(10.75, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
-                new Pair<>(new Point(11.0, -7.6, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),
-                new Pair<>(new Point(10.6, -6.76, 4.96), new Quaternion(0f, 0f, 1, 0))
-        ));
-        Mat image;
-        double[][] cropParams = {
-                {0.0, 0.0, 0.0, 0.1},  // Area 1
-                {0.0, 0.0, 0.2, 0.2}, // Area 2
-                {0.0, 0.0, 0.15, 0.25},  // Area 3
-                {0.0, 0.0, 0.0, 0.0}   // Area 4
-        };
-        //--------------------------------------------- MISSION START -------------------------------------------------------
-        //--------------------------------------------- Area Exploring -------------------------------------------------------
-
-        // The mission starts.
-        api.startMission(); // Coordinate -> x:9.815 y:-9.806 z:4.293 | p = 1 0 0 0
+        api.startMission(); // 🚀 Begin the mission
 
         try {
-            loadModel();
+            loadModel(); // 🎯 Load TensorFlow Lite model for item classification
         } catch (IOException e) {
             e.printStackTrace();
         }
 
+        // ------------------------ 🗺️ Area Setup ------------------------
+        ArrayList<Pair<Point, Quaternion>> areaCenters = new ArrayList<>(Arrays.asList(
+                new Pair<>(new Point(11.0, -10.0, 5.25), new Quaternion(0f, 0f, -0.707f, 0.707f)),   // Area 1
+                new Pair<>(new Point(10.75, -8.75, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),     // Area 2
+                new Pair<>(new Point(11.0, -7.6, 4.4), new Quaternion(0f, 0.707f, 0, 0.707f)),       // Area 3
+                new Pair<>(new Point(10.6, -6.76, 4.96), new Quaternion(0f, 0f, 1, 0))               // Area 4
+        ));
+
+        List<Map<String, Integer>> foundItemsPerArea = new ArrayList<>();
+        List<Mat> areaImages = new ArrayList<>();
+        double[][] cropParams = {
+                {0.0, 0.0, 0.0, 0.1},   // Area 1
+                {0.0, 0.0, 0.2, 0.2},   // Area 2
+                {0.0, 0.0, 0.15, 0.25}, // Area 3
+                {0.0, 0.0, 0.0, 0.0}    // Area 4 (no crop)
+        };
+
+        // ------------------------ 🔍 Explore Each Area ------------------------
         for (int i = 0; i < 4; i++) {
+            int areaId = 101 + i;
+
+            // Move to area
             moveToWithCheck(areaCenters.get(i).first, areaCenters.get(i).second, false);
-            id = 101 + i;
-            // Take a picture of the area
+
+            // Capture and save initial image
+            Mat image = api.getMatNavCam();
+            api.saveMatImage(image, "area_" + areaId + ".png");
+
+            // Use flashlight in Area 103 for better lighting
+            if (areaId == 103) api.flashlightControlFront(0.2f);
             image = api.getMatNavCam();
-//            id = readAR(image);
-            api.saveMatImage(image, "area_" + id + ".png");
+            if (areaId == 103) api.flashlightControlFront(0f);
 
-
-            if (id == 103){
-                api.flashlightControlFront(0.35f);
-            }
-
-            // Pre-processing
-            image = api.getMatNavCam();
-
-            if (id == 103){
-                api.flashlightControlFront(0f);
-            }
-
+            // Undistort and crop image
             image = undistortedImage(image);
-            api.saveMatImage(image, "undistorted_area_" + id + ".png");
-            double top = cropParams[i][0];
-            double bottom = cropParams[i][1];
-            double left = cropParams[i][2];
-            double right = cropParams[i][3];
-            // cropping
-            image = cropArea(image, top, bottom, left, right);
+            api.saveMatImage(image, "undistorted_area_" + areaId + ".png");
 
-            // detecting the items
-            analyzeAndStoreAreaItems(image, id, foundItemsPerArea);
-
-            // save a cropped image for debugging
-            areaImages.add(image);
+            image = cropArea(image, cropParams[i][0], cropParams[i][1], cropParams[i][2], cropParams[i][3]);
             api.saveMatImage(image, "cropped_area" + (i + 1) + ".png");
-            System.out.println("Astrobee Quaternion: " + api.getRobotKinematics().getOrientation().toString());
 
+            // Analyze cropped image
+            analyzeAndStoreAreaItems(image, areaId, foundItemsPerArea);
+            areaImages.add(image);
+
+            System.out.println("Astrobee Orientation: " + api.getRobotKinematics().getOrientation());
         }
 
-        // complete exploring 4 areas
-        //------------------------------------------------- Treasure Finding ---------------------------------------------------\
-        // Move to the Astronaut
+        // ------------------------ 👨‍🚀 Move to Astronaut ------------------------
         moveToAstronaut();
         api.reportRoundingCompletion();
 
         try {
-            Thread.sleep(3000); // 1000 ms = 1 second
+            Thread.sleep(3000);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        // detect the treasure
-        image = api.getMatNavCam();
-        api.saveMatImage(image, "target_area.png");
-        image = undistortedImage(image);
-        image = cropArea(image, 0.4, 0.4, 0.4, 0.4);
-        api.saveMatImage(image, "cropped_target_area.png");
-        String treasure = findTheTreasure(image);
 
-        // find the area that contains the treasure item
+        // ------------------------ 💎 Identify the Target Item ------------------------
+        Mat targetImg = api.getMatNavCam();
+        api.saveMatImage(targetImg, "target_area.png");
+
+        targetImg = undistortedImage(targetImg);
+        targetImg = cropArea(targetImg, 0.4, 0.4, 0.4, 0.4);
+        api.saveMatImage(targetImg, "cropped_target_area.png");
+
+        String treasure = findTheTreasure(targetImg);
+        api.notifyRecognitionItem();
+
+        // ------------------------ 🔎 Match Item to Area ------------------------
         int treasureArea = -1;
         for (int i = 0; i < foundItemsPerArea.size(); i++) {
             Map<String, Integer> areaMap = foundItemsPerArea.get(i);
-
-            for (Map.Entry<String, Integer> entry : areaMap.entrySet()) {
-                System.out.println("  Item: " + entry.getKey() + " → Count: " + entry.getValue());
-                if ( entry.getKey() == treasure){
-                    treasureArea = i;
-                    break;
-                }
-            }
-            if(treasureArea != -1){
+            if (areaMap.containsKey(treasure)) {
+                treasureArea = i;
                 break;
             }
         }
 
-        api.notifyRecognitionItem();
-        // --------------- re-check the found items ---------------------
+        // Print all items detected
         for (int i = 0; i < foundItemsPerArea.size(); i++) {
-            Map<String, Integer> areaMap = foundItemsPerArea.get(i);
-            System.out.println("Area " + i + ":");
-            for (Map.Entry<String, Integer> entry : areaMap.entrySet()) {
+            System.out.println("Area " + (i + 1) + ":");
+            for (Map.Entry<String, Integer> entry : foundItemsPerArea.get(i).entrySet()) {
                 System.out.println("  Item: " + entry.getKey() + " → Count: " + entry.getValue());
             }
         }
 
-        if(treasureArea != -1){
+        // ------------------------ 🎯 Approach Treasure ------------------------
+        if (treasureArea != -1) {
             moveToWithCheck(areaCenters.get(treasureArea).first, areaCenters.get(treasureArea).second, false);
-            image = api.getMatNavCam();
-            api.saveMatImage(undistortedImage(image), "treasure_area_first.png");
-            Pair<Point, Quaternion> goal = computePerpendicularPose(image, treasureArea + 1, 0.0);
 
+            Mat newImage = api.getMatNavCam();
+            api.saveMatImage(undistortedImage(newImage), "treasure_area_first.png");
 
+            Pair<Point, Quaternion> goal = computePerpendicularPose(newImage, treasureArea + 1, 0.1);
             if (goal != null) {
-//                Point dst;
-//                switch (treasureArea) {
-//                    case 1:
-//                        dst = new Point(goal.first.getX(), -10.0, Math.min(goal.first.getZ(), 5.4));
-//                        break;
-//                    case 3:
-//                        dst = new Point(goal.first.getX(), goal.first.getY(), areaCenters.get(treasureArea).first.getZ());
-//                        break;
-//                    case 4:
-//                        dst = new Point(areaCenters.get(treasureArea).first.getX(), goal.first.getY(), goal.first.getZ());
-//                        break;
-//                    default:
-//                        dst = new Point(goal.first.getX(), Math.max(goal.first.getY(), -10.0), areaCenters.get(treasureArea).first.getZ());
-//                        break;
-//                }
-
-                System.out.println("Area " + treasureArea +" Next Coordinate: " +goal.toString());
-//                moveToWithCheck(dst, areaCenters.get(treasureArea).second, false);
                 moveToWithCheck(goal.first, areaCenters.get(treasureArea).second, false);
-                image = api.getMatNavCam();
-                api.saveMatImage(undistortedImage(image), "treasure_area_AR.png");
-
+                Mat finalImage = api.getMatNavCam();
+                api.saveMatImage(undistortedImage(finalImage), "treasure_area_AR.png");
             } else {
                 System.out.println("❌ AR tag pose not computed — skipping movement.");
             }
-
-
-        }else {
-            System.out.println("Treasure Area NOT found");
+        } else {
+            System.out.println("❌ Treasure Area NOT found");
         }
 
+        // ✅ Finish mission
         api.takeTargetItemSnapshot();
     }
 
@@ -494,64 +447,6 @@ public class YourService extends KiboRpcService {
         return R;
     }
 
-    private Quaternion rotationMatrixToQuaternion(Mat R) {
-        double m00 = R.get(0,0)[0], m01 = R.get(0,1)[0], m02 = R.get(0,2)[0];
-        double m10 = R.get(1,0)[0], m11 = R.get(1,1)[0], m12 = R.get(1,2)[0];
-        double m20 = R.get(2,0)[0], m21 = R.get(2,1)[0], m22 = R.get(2,2)[0];
-
-        double tr = m00 + m11 + m22;
-        double qw, qx, qy, qz;
-
-        if (tr > 0) {
-            double S = Math.sqrt(tr + 1.0) * 2;
-            qw = 0.25 * S;
-            qx = (m21 - m12) / S;
-            qy = (m02 - m20) / S;
-            qz = (m10 - m01) / S;
-        } else if ((m00 > m11) & (m00 > m22)) {
-            double S = Math.sqrt(1.0 + m00 - m11 - m22) * 2;
-            qw = (m21 - m12) / S;
-            qx = 0.25 * S;
-            qy = (m01 + m10) / S;
-            qz = (m02 + m20) / S;
-        } else if (m11 > m22) {
-            double S = Math.sqrt(1.0 + m11 - m00 - m22) * 2;
-            qw = (m02 - m20) / S;
-            qx = (m01 + m10) / S;
-            qy = 0.25 * S;
-            qz = (m12 + m21) / S;
-        } else {
-            double S = Math.sqrt(1.0 + m22 - m00 - m11) * 2;
-            qw = (m10 - m01) / S;
-            qx = (m02 + m20) / S;
-            qy = (m12 + m21) / S;
-            qz = 0.25 * S;
-        }
-
-        return new Quaternion((float)qx, (float)qy, (float)qz, (float)qw);
-    }
-
-    private int readAR(Mat image){
-        // Use ArUco detector (part of OpenCV contrib modules)
-        org.opencv.aruco.Dictionary dictionary = org.opencv.aruco.Aruco.getPredefinedDictionary(org.opencv.aruco.Aruco.DICT_5X5_250);
-        java.util.List<Mat> corners = new java.util.ArrayList<>();
-        Mat ids = new Mat();
-        org.opencv.aruco.DetectorParameters parameters = org.opencv.aruco.DetectorParameters.create();
-        org.opencv.aruco.Aruco.detectMarkers(image, dictionary, corners, ids, parameters);
-
-        System.out.println("Raw data from AR tag:" + ids);
-
-        // Log AR tag IDs
-        if (!ids.empty()) {
-            int id = (int) ids.get(0, 0)[0];
-            System.out.println("Detected AR tag ID: " + id);
-            return id;
-        }
-
-        System.out.println("AR tag wasn't detected!!!");
-        return -1;
-    }
-
     private String classifyImage(Mat image) {
         // Step 1: Resize to model input size (e.g., 96x96)
         int inputSize = 96;
@@ -615,7 +510,7 @@ public class YourService extends KiboRpcService {
     private void analyzeAndStoreAreaItems(Mat image, int areaId, List<Map<String, Integer>> foundItemsPerArea) {
         areaId = areaId % 10;
         // Detect and classify items
-        List<Mat> croppedImages = CroppedContours(image, 15);
+        List<Mat> croppedImages = CroppedContours(image, 13);
         Map<String, Integer> itemCounts = new HashMap<>();
 
         for (Mat region : croppedImages) {
